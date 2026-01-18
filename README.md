@@ -43,7 +43,8 @@ publime/
 │   ├── search_engine.py     # 搜索引擎
 │   ├── syntax_highlighter.py # 语法高亮
 │   ├── history_manager.py   # 历史记录管理
-│   └── code_completer.py    # 代码补全（基础）
+│   ├── code_completer.py    # 代码补全（基础）
+│   └── sql_formatter.py     # SQL 格式化器
 ├── themes/                  # 主题系统
 │   ├── theme_manager.py     # 主题管理器
 │   ├── dark_theme.py        # 深色主题
@@ -54,7 +55,6 @@ publime/
 ├── samples/                 # 示例文件
 ├── main.py                  # 应用入口
 ├── build_exe.py             # 打包脚本
-├── sql_formatter_new.py     # SQL 格式化器
 └── requirements.txt         # Python 依赖
 ```
 
