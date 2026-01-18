@@ -719,7 +719,7 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # 使用新的 SQL 格式化器
+            # 使用我们自己的 SQL 格式化器
             from sql_formatter_new import format_sql as format_sql_text
             
             # 获取当前文本
