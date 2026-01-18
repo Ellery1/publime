@@ -816,7 +816,7 @@ def format_insert(statement: str) -> str:
         update_assignments = split_columns(update_part)
         
         result_lines = formatted_insert.split('\n')
-        result_lines.append(' ON DUPLICATE KEY')
+        result_lines.append('ON DUPLICATE KEY')
         result_lines.append('UPDATE')
         
         for i, assignment in enumerate(update_assignments):
