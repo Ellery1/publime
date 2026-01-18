@@ -8,6 +8,10 @@
 4. UPDATE 后面换行，表名单独一行
 5. 子查询正确缩进
 6. 窗口函数内部正确缩进
+7. WITH 子句（CTE）正确格式化
+8. CASE 语句每个 WHEN 单独一行
+9. ON DUPLICATE KEY UPDATE 正确格式化
+10. 修复分号重复问题
 """
 
 import re
@@ -115,7 +119,7 @@ def format_statement(statement: str) -> str:
     
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith('--'):
+        if stripped.startswith('--') or stripped.startswith('/*'):
             leading_comments.append(stripped)
         else:
             sql_lines.append(line)
@@ -125,7 +129,13 @@ def format_statement(statement: str) -> str:
     # 判断语句类型
     statement_upper = statement.upper().strip()
     
-    if statement_upper.startswith('SELECT'):
+    # 检查是否是 CREATE TABLE ... AS WITH ... 或 CREATE TEMPORARY TABLE ... AS WITH ...
+    if re.search(r'CREATE\s+(TEMPORARY\s+)?TABLE.*\s+AS\s+WITH\s+', statement_upper):
+        formatted = format_create_table_as_with(statement)
+    elif statement_upper.startswith('WITH'):
+        # 独立的 WITH 语句
+        formatted = format_with_clause(statement)
+    elif statement_upper.startswith('SELECT'):
         formatted = format_select(statement)
     elif statement_upper.startswith('CREATE TABLE'):
         formatted = format_create_table(statement)
@@ -144,13 +154,17 @@ def format_statement(statement: str) -> str:
     elif statement_upper.startswith('USE'):
         formatted = format_use(statement)
     else:
-        formatted = statement.strip() + ';'
+        # 确保以分号结尾（如果原本没有）
+        formatted = statement.strip()
+        if not formatted.endswith(';'):
+            formatted += ';'
     
     # 合并前导注释
     if leading_comments:
         formatted = '\n'.join(leading_comments) + '\n' + formatted
     
     return formatted
+
 
 
 def format_select(statement: str, indent_level: int = 0) -> str:
@@ -173,13 +187,6 @@ def format_select(statement: str, indent_level: int = 0) -> str:
     # 基础缩进
     base_indent = '  ' * indent_level
     item_indent = '  ' * (indent_level + 1)
-    
-    # 检查是否包含子查询
-    has_subquery = '(' in statement and 'SELECT' in statement.upper()
-    
-    # 如果有子查询，先处理子查询
-    if has_subquery:
-        statement = process_subqueries(statement, indent_level + 1)
     
     # 提取各个部分
     select_match = re.search(r'SELECT\s+(.*?)\s+FROM', statement, re.IGNORECASE | re.DOTALL)
@@ -219,6 +226,13 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                     result_lines.append(formatted_case.rstrip() + ',')
                 else:
                     result_lines.append(formatted_case)
+            # 处理子查询
+            elif '(' in col and 'SELECT' in col.upper():
+                formatted_subquery = format_subquery_in_column(col, indent_level + 1)
+                if i < len(cols) - 1:
+                    result_lines.append(formatted_subquery.rstrip() + ',')
+                else:
+                    result_lines.append(formatted_subquery)
             else:
                 if i < len(cols) - 1:
                     result_lines.append(f'{item_indent}{col},')
@@ -237,10 +251,18 @@ def format_select(statement: str, indent_level: int = 0) -> str:
         result_lines.append(f'{base_indent}WHERE')
         where_conditions = split_and_conditions(where_clause)
         for i, cond in enumerate(where_conditions):
-            if i == 0:
-                result_lines.append(f'{item_indent}{cond}')
+            # 处理子查询
+            if '(' in cond and 'SELECT' in cond.upper():
+                formatted_cond = format_condition_with_subquery(cond, indent_level + 1)
+                if i == 0:
+                    result_lines.append(f'{item_indent}{formatted_cond}')
+                else:
+                    result_lines.append(f'{item_indent}AND {formatted_cond}')
             else:
-                result_lines.append(f'{item_indent}AND {cond}')
+                if i == 0:
+                    result_lines.append(f'{item_indent}{cond}')
+                else:
+                    result_lines.append(f'{item_indent}AND {cond}')
     
     # GROUP BY
     if groupby_clause:
@@ -277,7 +299,9 @@ def format_select(statement: str, indent_level: int = 0) -> str:
         if limit_value:
             result_lines.append(f'{base_indent}LIMIT {limit_value};')
         else:
-            result_lines[-1] += ';'
+            # 只在顶层 SELECT 添加分号
+            if not result_lines[-1].endswith(';'):
+                result_lines[-1] += ';'
     else:
         if limit_value:
             result_lines.append(f'{base_indent}LIMIT {limit_value}')
@@ -285,41 +309,35 @@ def format_select(statement: str, indent_level: int = 0) -> str:
     return '\n'.join(result_lines)
 
 
-def process_subqueries(statement: str, indent_level: int) -> str:
-    """
-    处理子查询，将其格式化并替换为占位符
+def format_subquery_in_column(col: str, indent_level: int) -> str:
+    """格式化列中的子查询"""
+    # 提取子查询
+    match = re.search(r'\((SELECT.+?)\)', col, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return '  ' * indent_level + col
     
-    Args:
-        statement: SQL 语句
-        indent_level: 缩进级别
-        
-    Returns:
-        处理后的语句
-    """
-    # 查找子查询（括号内的 SELECT）
-    subqueries = []
-    result = statement
+    subquery = match.group(1)
+    formatted_subquery = format_select(subquery, indent_level + 1)
     
-    # 简单处理：查找 ( SELECT ... )
-    pattern = r'\(\s*SELECT\s+.*?\)'
+    # 替换原始子查询
+    result = col.replace(match.group(0), f'(\n{formatted_subquery}\n' + '  ' * indent_level + ')')
     
-    def replace_subquery(match):
-        subquery = match.group(0)
-        # 移除外层括号
-        inner = subquery[1:-1].strip()
-        # 格式化子查询
-        formatted = format_select(inner, indent_level)
-        # 添加括号
-        lines = formatted.split('\n')
-        formatted_lines = ['(']
-        for line in lines:
-            formatted_lines.append(line)
-        formatted_lines.append('  ' * indent_level + ')')
-        subqueries.append('\n'.join(formatted_lines))
-        return f'__SUBQUERY_{len(subqueries)-1}__'
+    return '  ' * indent_level + result
+
+
+def format_condition_with_subquery(cond: str, indent_level: int) -> str:
+    """格式化包含子查询的条件"""
+    # 查找 IN (SELECT ...) 或其他包含子查询的模式
+    match = re.search(r'IN\s*\((SELECT.+?)\)', cond, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return cond
     
-    # 这里需要更复杂的逻辑来正确匹配括号
-    # 暂时简化处理
+    subquery = match.group(1)
+    formatted_subquery = format_select(subquery, indent_level + 1)
+    
+    # 替换原始子查询
+    result = cond.replace(match.group(0), f'IN(\n{formatted_subquery}\n' + '  ' * indent_level + ')')
+    
     return result
 
 
@@ -366,6 +384,129 @@ def format_case_expression(expr: str, indent_level: int) -> str:
     return '\n'.join(lines)
 
 
+
+def format_create_table_as_with(statement: str) -> str:
+    """格式化 CREATE TABLE ... AS WITH ... 语句"""
+    # 移除所有换行，变成一行
+    statement = ' '.join(statement.split())
+    
+    # 移除分号
+    statement = statement.rstrip(';').strip()
+    
+    # 提取 CREATE TABLE 部分和 WITH 部分
+    # 匹配 CREATE [TEMPORARY] TABLE [IF NOT EXISTS] table_name AS WITH ...
+    match = re.search(
+        r'(CREATE\s+(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\w.]+)\s+AS\s+(WITH\s+.+)',
+        statement,
+        re.IGNORECASE | re.DOTALL
+    )
+    
+    if not match:
+        # 如果不匹配，回退到普通 CREATE TABLE
+        return format_create_table(statement)
+    
+    create_part = match.group(1)
+    with_part = match.group(2)
+    
+    # 格式化 WITH 子句
+    formatted_with = format_with_clause(with_part)
+    
+    # 构建结果
+    result = f'{create_part} AS\n{formatted_with}'
+    
+    return result
+
+
+def format_with_clause(statement: str) -> str:
+    """
+    格式化 WITH 子句（CTE - Common Table Expression）
+    
+    Args:
+        statement: WITH 子句
+        
+    Returns:
+        格式化后的 WITH 子句
+    """
+    # 移除所有换行，变成一行
+    statement = ' '.join(statement.split())
+    
+    # 移除分号
+    statement = statement.rstrip(';').strip()
+    
+    # 提取 WITH 关键字后的内容
+    match = re.search(r'WITH\s+(.+)', statement, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return statement
+    
+    content = match.group(1)
+    
+    # 使用更简单的方法：找到所有 CTE_NAME AS (...)
+    ctes = []
+    final_select = None
+    
+    i = 0
+    while i < len(content):
+        # 跳过空白
+        while i < len(content) and content[i].isspace():
+            i += 1
+        
+        if i >= len(content):
+            break
+        
+        # 查找 CTE 名称
+        cte_name_match = re.match(r'(\w+)\s+AS\s*\(', content[i:], re.IGNORECASE)
+        if not cte_name_match:
+            # 可能是最终的 SELECT
+            if content[i:].strip().upper().startswith('SELECT'):
+                final_select = content[i:].strip()
+            break
+        
+        cte_name = cte_name_match.group(1)
+        i += cte_name_match.end()
+        
+        # 找到匹配的右括号
+        depth = 1
+        start = i
+        while i < len(content) and depth > 0:
+            if content[i] == '(':
+                depth += 1
+            elif content[i] == ')':
+                depth -= 1
+            i += 1
+        
+        # 提取 CTE 内容（不包括外层括号）
+        cte_content = content[start:i-1].strip()
+        ctes.append((cte_name, cte_content))
+        
+        # 跳过逗号
+        while i < len(content) and (content[i].isspace() or content[i] == ','):
+            i += 1
+    
+    # 格式化所有 CTE
+    result_lines = ['WITH']
+    
+    for idx, (cte_name, cte_content) in enumerate(ctes):
+        # 格式化 SELECT 语句（缩进级别为 1）
+        formatted_select = format_select(cte_content, indent_level=1)
+        
+        if idx == 0:
+            result_lines.append(f'{cte_name} AS (')
+        else:
+            result_lines.append(',')
+            result_lines.append(f'{cte_name} AS (')
+        
+        # 添加格式化的 SELECT（已经有缩进）
+        result_lines.append(formatted_select)
+        result_lines.append(')')
+    
+    # 添加最终的 SELECT
+    if final_select:
+        formatted_final_select = format_select(final_select, indent_level=0)
+        result_lines.append(formatted_final_select)
+    
+    return '\n'.join(result_lines)
+
+
 def format_create_table(statement: str) -> str:
     """格式化 CREATE TABLE 语句"""
     # 移除所有换行，变成一行
@@ -375,9 +516,12 @@ def format_create_table(statement: str) -> str:
     statement = statement.rstrip(';').strip()
     
     # 提取表名和列定义
-    match = re.search(r'CREATE TABLE\s+(\w+)\s*\((.*)\)', statement, re.IGNORECASE | re.DOTALL)
+    match = re.search(r'CREATE\s+TABLE\s+(\w+)\s*\((.*)\)', statement, re.IGNORECASE | re.DOTALL)
     if not match:
-        return statement + ';'
+        # 确保以分号结尾（如果原本没有）
+        if not statement.endswith(';'):
+            return statement + ';'
+        return statement
     
     table_name = match.group(1)
     columns_def = match.group(2)
@@ -409,9 +553,12 @@ def format_create_view(statement: str) -> str:
     statement = statement.rstrip(';').strip()
     
     # 提取视图名和 SELECT 语句
-    match = re.search(r'CREATE VIEW\s+(\w+)\s+AS\s+(SELECT.*)', statement, re.IGNORECASE | re.DOTALL)
+    match = re.search(r'CREATE\s+VIEW\s+(\w+)\s+AS\s+(SELECT.*)', statement, re.IGNORECASE | re.DOTALL)
     if not match:
-        return statement + ';'
+        # 确保以分号结尾（如果原本没有）
+        if not statement.endswith(';'):
+            return statement + ';'
+        return statement
     
     view_name = match.group(1)
     select_statement = match.group(2)
@@ -449,6 +596,7 @@ def format_create_database(statement: str) -> str:
     return statement
 
 
+
 def format_insert(statement: str) -> str:
     """格式化 INSERT 语句"""
     # 移除所有换行，变成一行
@@ -457,14 +605,69 @@ def format_insert(statement: str) -> str:
     # 移除分号
     statement = statement.rstrip(';').strip()
     
+    # 检查是否有 ON DUPLICATE KEY UPDATE
+    on_duplicate_match = re.search(
+        r'(.*?)\s+ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+)',
+        statement,
+        re.IGNORECASE | re.DOTALL
+    )
+    
+    if on_duplicate_match:
+        # 有 ON DUPLICATE KEY UPDATE
+        insert_part = on_duplicate_match.group(1).strip()
+        update_part = on_duplicate_match.group(2).strip()
+        
+        # 格式化 INSERT 部分
+        formatted_insert = format_insert_basic(insert_part)
+        
+        # 移除 INSERT 部分末尾的分号（如果有）
+        if formatted_insert.endswith(';'):
+            formatted_insert = formatted_insert[:-1]
+        
+        # 格式化 UPDATE 部分
+        update_assignments = split_columns(update_part)
+        
+        result_lines = formatted_insert.split('\n')
+        result_lines.append(' ON DUPLICATE KEY')
+        result_lines.append('UPDATE')
+        
+        for i, assignment in enumerate(update_assignments):
+            if i < len(update_assignments) - 1:
+                result_lines.append(f'  {assignment},')
+            else:
+                result_lines.append(f'  {assignment};')
+        
+        return '\n'.join(result_lines)
+    else:
+        # 没有 ON DUPLICATE KEY UPDATE，使用基本格式化
+        return format_insert_basic(statement)
+
+
+def format_insert_basic(statement: str) -> str:
+    """格式化基本 INSERT 语句（不包含 ON DUPLICATE KEY UPDATE）"""
+    # 先检查是否是 INSERT INTO ... SELECT
+    select_match = re.search(r'INSERT\s+INTO\s+(\w+)\s*\((.*?)\)\s*SELECT\s+(.+)', statement, re.IGNORECASE | re.DOTALL)
+    if select_match:
+        table_name = select_match.group(1)
+        columns = select_match.group(2)
+        select_part = 'SELECT ' + select_match.group(3)
+        
+        # 格式化 SELECT 语句
+        formatted_select = format_select(select_part, indent_level=0)
+        result = f'INSERT INTO {table_name} ({columns})\n{formatted_select}'
+        return result
+    
     # 提取表名、列和值
-    match = re.search(r'INSERT INTO\s+(\w+)\s*\((.*?)\)\s*VALUES\s*(.*)$', statement, re.IGNORECASE | re.DOTALL)
+    match = re.search(r'INSERT\s+INTO\s+(\w+)\s*\((.*?)\)\s*VALUES\s+(.+)', statement, re.IGNORECASE | re.DOTALL)
     if not match:
-        return statement + ';'
+        # 确保以分号结尾（如果原本没有）
+        if not statement.endswith(';'):
+            return statement + ';'
+        return statement
     
     table_name = match.group(1)
     columns = match.group(2)
-    values = match.group(3)
+    values_or_select = match.group(3)
     
     # 分割列
     column_list = [col.strip() for col in columns.split(',')]
@@ -474,7 +677,7 @@ def format_insert(statement: str) -> str:
     current = ''
     depth = 0
     
-    for char in values:
+    for char in values_or_select:
         if char == '(':
             depth += 1
         elif char == ')':
@@ -512,7 +715,10 @@ def format_update(statement: str) -> str:
     # 提取表名、SET 和 WHERE
     match = re.search(r'UPDATE\s+(\w+)\s+SET\s+(.*?)(?:\s+WHERE\s+(.*))?$', statement, re.IGNORECASE | re.DOTALL)
     if not match:
-        return statement + ';'
+        # 确保以分号结尾（如果原本没有）
+        if not statement.endswith(';'):
+            return statement + ';'
+        return statement
     
     table_name = match.group(1)
     set_clause = match.group(2)
@@ -526,21 +732,38 @@ def format_update(statement: str) -> str:
     result_lines.append('SET')
     
     for i, assignment in enumerate(assignments):
-        if i < len(assignments) - 1:
-            result_lines.append(f'  {assignment},')
+        # 处理 CASE 语句
+        if 'CASE' in assignment.upper():
+            formatted_case = format_case_expression(assignment, indent_level=1)
+            if i < len(assignments) - 1:
+                result_lines.append(formatted_case.rstrip() + ',')
+            else:
+                result_lines.append(formatted_case)
         else:
-            result_lines.append(f'  {assignment}')
+            if i < len(assignments) - 1:
+                result_lines.append(f'  {assignment},')
+            else:
+                result_lines.append(f'  {assignment}')
     
     # WHERE
     if where_clause:
         result_lines.append('WHERE')
         where_conditions = split_and_conditions(where_clause)
         for i, cond in enumerate(where_conditions):
-            if i == 0:
-                result_lines.append(f'  {cond}')
+            # 处理子查询
+            if '(' in cond and 'SELECT' in cond.upper():
+                formatted_cond = format_condition_with_subquery(cond, indent_level=1)
+                if i == 0:
+                    result_lines.append(f'  {formatted_cond}')
+                else:
+                    result_lines.append(f'  AND {formatted_cond}')
             else:
-                result_lines.append(f'  AND {cond}')
+                if i == 0:
+                    result_lines.append(f'  {cond}')
+                else:
+                    result_lines.append(f'  AND {cond}')
     
+    # 添加分号
     result_lines[-1] += ';'
     
     return '\n'.join(result_lines)
@@ -557,7 +780,10 @@ def format_delete(statement: str) -> str:
     # 提取表名和 WHERE
     match = re.search(r'DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.*))?$', statement, re.IGNORECASE | re.DOTALL)
     if not match:
-        return statement + ';'
+        # 确保以分号结尾（如果原本没有）
+        if not statement.endswith(';'):
+            return statement + ';'
+        return statement
     
     table_name = match.group(1)
     where_clause = match.group(2) if match.group(2) else ''
@@ -575,6 +801,7 @@ def format_delete(statement: str) -> str:
             else:
                 result_lines.append(f'  AND {cond}')
     
+    # 添加分号
     result_lines[-1] += ';'
     
     return '\n'.join(result_lines)
@@ -590,6 +817,7 @@ def format_use(statement: str) -> str:
         statement += ';'
     
     return statement
+
 
 
 def split_columns(text: str) -> List[str]:
@@ -638,7 +866,7 @@ def split_joins(text: str) -> List[str]:
     parts = []
     
     # 分割 JOIN
-    join_pattern = r'\s+(INNER JOIN|LEFT JOIN|RIGHT JOIN|JOIN)\s+'
+    join_pattern = r'\s+(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|JOIN)\s+'
     segments = re.split(join_pattern, text, flags=re.IGNORECASE)
     
     if segments:
