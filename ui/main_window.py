@@ -47,6 +47,9 @@ class MainWindow(QMainWindow):
         self.autosave_dir = os.path.join(tempfile.gettempdir(), 'publime_autosave')
         os.makedirs(self.autosave_dir, exist_ok=True)
         
+        # 会话文件
+        self.session_file = os.path.join(self.autosave_dir, 'session.json')
+        
         # 设置窗口
         self.setWindowTitle("Publime - 文本编辑器")
         self.resize(1200, 800)
@@ -69,8 +72,12 @@ class MainWindow(QMainWindow):
         self.theme_manager.set_current_theme("Dark")
         self.apply_theme("Dark")
         
-        # 检查崩溃恢复
-        self.check_crash_recovery()
+        # 检查崩溃恢复（优先级最高）
+        recovered = self.check_crash_recovery()
+        
+        # 如果没有崩溃恢复，尝试恢复上次会话
+        if not recovered:
+            self.restore_session()
         
         # 如果没有恢复任何文件，创建一个新文件
         if self.tab_widget.count() == 0:
@@ -1126,11 +1133,16 @@ class MainWindow(QMainWindow):
             pass  # 自动保存失败不应该影响用户操作
     
     def check_crash_recovery(self):
-        """检查是否有崩溃恢复数据"""
+        """
+        检查是否有崩溃恢复数据
+        
+        Returns:
+            bool: 是否恢复了文件
+        """
         metadata_file = os.path.join(self.autosave_dir, 'metadata.json')
         
         if not os.path.exists(metadata_file):
-            return
+            return False
         
         try:
             with open(metadata_file, 'r', encoding='utf-8') as f:
@@ -1138,7 +1150,7 @@ class MainWindow(QMainWindow):
             
             # 检查是否有文件需要恢复
             if not autosave_data.get('files'):
-                return
+                return False
             
             # 询问用户是否恢复
             reply = QMessageBox.question(
@@ -1151,6 +1163,7 @@ class MainWindow(QMainWindow):
             
             if reply == QMessageBox.Yes:
                 # 恢复文件
+                recovered_count = 0
                 for file_info in autosave_data['files']:
                     autosave_path = file_info.get('autosave_path')
                     original_path = file_info.get('original_path')
@@ -1185,11 +1198,24 @@ class MainWindow(QMainWindow):
                         
                         # 应用主题
                         self.apply_current_theme_to_editor(editor)
+                        recovered_count += 1
                     
                     except Exception:
                         pass  # 忽略单个文件的恢复错误
                 
-                self.statusBar().showMessage("已恢复上次会话", 3000)
+                if recovered_count > 0:
+                    self.statusBar().showMessage(f"已恢复 {recovered_count} 个文件", 3000)
+                
+                # 清理自动保存文件
+                self.clear_autosave_files()
+                return True
+            else:
+                # 用户选择不恢复，清理自动保存文件
+                self.clear_autosave_files()
+                return False
+        
+        except Exception:
+            return False  # 恢复失败不应该阻止程序启动
             
             # 清理自动保存文件
             self.clear_autosave_files()
@@ -1202,10 +1228,63 @@ class MainWindow(QMainWindow):
         try:
             for file in os.listdir(self.autosave_dir):
                 file_path = os.path.join(self.autosave_dir, file)
-                if os.path.isfile(file_path):
+                # 不删除 session.json
+                if os.path.isfile(file_path) and not file_path.endswith('session.json'):
                     os.remove(file_path)
         except Exception:
             pass
+    
+    def save_session(self):
+        """保存当前会话（打开的文件列表）"""
+        try:
+            session_data = {
+                'timestamp': datetime.now().isoformat(),
+                'files': []
+            }
+            
+            # 保存所有打开的文件路径
+            for i in range(self.tab_widget.count()):
+                editor = self.tab_widget.get_editor_at(i)
+                if editor:
+                    file_path = editor.get_file_path()
+                    # 只保存已保存的文件（有文件路径的）
+                    if file_path and os.path.exists(file_path):
+                        session_data['files'].append({
+                            'path': file_path,
+                            'index': i
+                        })
+            
+            # 保存到文件
+            with open(self.session_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, indent=2)
+        
+        except Exception:
+            pass  # 保存会话失败不应该影响关闭
+    
+    def restore_session(self):
+        """恢复上次会话"""
+        if not os.path.exists(self.session_file):
+            return
+        
+        try:
+            with open(self.session_file, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+            
+            files = session_data.get('files', [])
+            if not files:
+                return
+            
+            # 恢复文件
+            for file_info in files:
+                file_path = file_info.get('path')
+                if file_path and os.path.exists(file_path):
+                    try:
+                        self.open_file(file_path)
+                    except Exception:
+                        pass  # 忽略单个文件的恢复错误
+        
+        except Exception:
+            pass  # 恢复会话失败不应该阻止程序启动
     
     def dragEnterEvent(self, event: QDragEnterEvent):
         """拖拽进入事件"""
@@ -1257,6 +1336,9 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 # 如果点击"不保存"，继续关闭
+        
+        # 保存当前会话
+        self.save_session()
         
         # 正常关闭时清理自动保存文件
         self.clear_autosave_files()
