@@ -26,8 +26,13 @@ from datetime import datetime
 class MainWindow(QMainWindow):
     """主窗口类"""
     
-    def __init__(self):
-        """初始化主窗口"""
+    def __init__(self, has_command_line_files=False):
+        """
+        初始化主窗口
+        
+        Args:
+            has_command_line_files: 是否有命令行参数指定的文件
+        """
         super().__init__()
         
         # 初始化管理器
@@ -75,12 +80,15 @@ class MainWindow(QMainWindow):
         # 检查崩溃恢复（优先级最高）
         recovered = self.check_crash_recovery()
         
-        # 如果没有崩溃恢复，尝试恢复上次会话
-        if not recovered:
+        # 如果没有崩溃恢复，且没有命令行文件，尝试恢复上次会话
+        if not recovered and not has_command_line_files:
             self.restore_session()
         
-        # 如果没有恢复任何文件，创建一个新文件
-        if self.tab_widget.count() == 0:
+        # 只有在以下情况才创建新文件：
+        # 1. 没有恢复任何文件
+        # 2. 没有命令行参数指定的文件
+        # 3. 直接打开 Publime.exe
+        if self.tab_widget.count() == 0 and not has_command_line_files:
             self.new_file()
         
         # 设置自动保存定时器（每5分钟）
