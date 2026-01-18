@@ -436,7 +436,7 @@ def format_case_expression(expr: str, indent_level: int) -> str:
     格式化 CASE 表达式
     
     Args:
-        expr: CASE 表达式
+        expr: CASE 表达式（可能包含赋值，如 "user_level = CASE ... END"）
         indent_level: 缩进级别
         
     Returns:
@@ -445,29 +445,127 @@ def format_case_expression(expr: str, indent_level: int) -> str:
     base_indent = '  ' * indent_level
     item_indent = '  ' * (indent_level + 1)
     
+    # 检查是否有赋值（如 "user_level = CASE ..."）
+    assignment_prefix = ''
+    case_start = expr.upper().find('CASE')
+    if case_start > 0:
+        assignment_prefix = expr[:case_start].strip() + ' '
+        expr = expr[case_start:]
+    
     # 提取 CASE ... END 部分
     case_match = re.search(r'(CASE\s+.*?\s+END)(\s+AS\s+\w+)?', expr, re.IGNORECASE | re.DOTALL)
     if not case_match:
-        return f'{base_indent}{expr}'
+        return f'{base_indent}{assignment_prefix}{expr}'
     
     case_body = case_match.group(1)
     as_clause = case_match.group(2) if case_match.group(2) else ''
     
-    # 分割 WHEN/THEN/ELSE
-    lines = [f'{base_indent}CASE']
+    # 分割 WHEN/THEN/ELSE - 使用深度感知的解析
+    lines = [f'{base_indent}{assignment_prefix}CASE']
     
-    # 提取所有 WHEN ... THEN ...
-    when_pattern = r'WHEN\s+(.*?)\s+THEN\s+(.*?)(?=\s+WHEN|\s+ELSE|\s+END)'
-    for match in re.finditer(when_pattern, case_body, re.IGNORECASE | re.DOTALL):
-        condition = match.group(1).strip()
-        result = match.group(2).strip()
-        lines.append(f'{item_indent}WHEN {condition} THEN {result}')
-    
-    # 提取 ELSE
-    else_match = re.search(r'ELSE\s+(.*?)(?=\s+END)', case_body, re.IGNORECASE | re.DOTALL)
-    if else_match:
-        else_value = else_match.group(1).strip()
-        lines.append(f'{item_indent}ELSE {else_value}')
+    # 手动解析 WHEN/THEN，考虑括号深度
+    i = 4  # 跳过 'CASE'
+    while i < len(case_body):
+        # 跳过空白
+        while i < len(case_body) and case_body[i].isspace():
+            i += 1
+        
+        if i >= len(case_body):
+            break
+        
+        # 检查 WHEN
+        if case_body[i:i+4].upper() == 'WHEN':
+            i += 4
+            # 跳过空白
+            while i < len(case_body) and case_body[i].isspace():
+                i += 1
+            
+            # 提取条件（直到 THEN，考虑括号）
+            condition = ''
+            depth = 0
+            while i < len(case_body):
+                if case_body[i] == '(':
+                    depth += 1
+                    condition += case_body[i]
+                elif case_body[i] == ')':
+                    depth -= 1
+                    condition += case_body[i]
+                elif depth == 0 and case_body[i:i+4].upper() == 'THEN':
+                    break
+                else:
+                    condition += case_body[i]
+                i += 1
+            
+            # 跳过 THEN
+            if case_body[i:i+4].upper() == 'THEN':
+                i += 4
+            
+            # 跳过空白
+            while i < len(case_body) and case_body[i].isspace():
+                i += 1
+            
+            # 提取结果（直到下一个 WHEN、ELSE 或 END，考虑括号）
+            result = ''
+            depth = 0
+            while i < len(case_body):
+                if case_body[i] == '(':
+                    depth += 1
+                    result += case_body[i]
+                elif case_body[i] == ')':
+                    depth -= 1
+                    result += case_body[i]
+                elif depth == 0:
+                    next_keyword = case_body[i:i+4].upper()
+                    if next_keyword == 'WHEN' or next_keyword == 'ELSE' or next_keyword.startswith('END'):
+                        break
+                    result += case_body[i]
+                else:
+                    result += case_body[i]
+                i += 1
+            
+            # 格式化条件中的子查询
+            condition = condition.strip()
+            if '(' in condition and 'SELECT' in condition.upper():
+                # 找到 IN( 或其他操作符后的子查询
+                in_match = re.search(r'(.*?IN\s*)\((SELECT.+)\)$', condition, re.IGNORECASE | re.DOTALL)
+                if in_match:
+                    prefix = in_match.group(1)
+                    subquery = in_match.group(2)
+                    formatted_subquery = format_select(subquery, indent_level + 2)
+                    condition = f'{prefix}(\n{formatted_subquery}\n{item_indent})'
+            
+            lines.append(f'{item_indent}WHEN {condition} THEN {result.strip()}')
+        
+        # 检查 ELSE
+        elif case_body[i:i+4].upper() == 'ELSE':
+            i += 4
+            # 跳过空白
+            while i < len(case_body) and case_body[i].isspace():
+                i += 1
+            
+            # 提取 ELSE 值（直到 END）
+            else_value = ''
+            depth = 0
+            while i < len(case_body):
+                if case_body[i] == '(':
+                    depth += 1
+                    else_value += case_body[i]
+                elif case_body[i] == ')':
+                    depth -= 1
+                    else_value += case_body[i]
+                elif depth == 0 and case_body[i:i+3].upper() == 'END':
+                    break
+                else:
+                    else_value += case_body[i]
+                i += 1
+            
+            lines.append(f'{item_indent}ELSE {else_value.strip()}')
+        
+        # 检查 END
+        elif case_body[i:i+3].upper() == 'END':
+            break
+        else:
+            i += 1
     
     lines.append(f'{base_indent}END{as_clause}')
     
@@ -802,17 +900,18 @@ def format_update(statement: str) -> str:
     # 移除分号
     statement = statement.rstrip(';').strip()
     
-    # 提取表名、SET 和 WHERE
-    match = re.search(r'UPDATE\s+(\w+)\s+SET\s+(.*?)(?:\s+WHERE\s+(.*))?$', statement, re.IGNORECASE | re.DOTALL)
-    if not match:
-        # 确保以分号结尾（如果原本没有）
+    # 使用深度感知的解析
+    parts = parse_update_statement(statement)
+    
+    if not parts['table']:
+        # 解析失败，确保以分号结尾
         if not statement.endswith(';'):
             return statement + ';'
         return statement
     
-    table_name = match.group(1)
-    set_clause = match.group(2)
-    where_clause = match.group(3) if match.group(3) else ''
+    table_name = parts['table']
+    set_clause = parts['set']
+    where_clause = parts['where']
     
     # 分割 SET 赋值
     assignments = split_columns(set_clause)
@@ -857,6 +956,94 @@ def format_update(statement: str) -> str:
     result_lines[-1] += ';'
     
     return '\n'.join(result_lines)
+
+
+def parse_update_statement(statement: str) -> dict:
+    """
+    解析 UPDATE 语句，提取各个部分（考虑括号深度）
+    
+    Args:
+        statement: UPDATE 语句
+        
+    Returns:
+        包含各部分的字典
+    """
+    parts = {
+        'table': '',
+        'set': '',
+        'where': ''
+    }
+    
+    # 查找 UPDATE 关键字
+    update_pos = statement.upper().find('UPDATE')
+    if update_pos == -1:
+        return parts
+    
+    # 从 UPDATE 后开始解析
+    i = update_pos + 6  # len('UPDATE')
+    
+    # 跳过空白
+    while i < len(statement) and statement[i].isspace():
+        i += 1
+    
+    # 提取表名
+    table_name = ''
+    while i < len(statement) and not statement[i].isspace():
+        table_name += statement[i]
+        i += 1
+    parts['table'] = table_name
+    
+    # 跳过空白
+    while i < len(statement) and statement[i].isspace():
+        i += 1
+    
+    # 查找 SET 关键字
+    if not statement[i:].upper().startswith('SET'):
+        return parts
+    
+    i += 3  # len('SET')
+    
+    # 跳过空白
+    while i < len(statement) and statement[i].isspace():
+        i += 1
+    
+    # 解析 SET 和 WHERE 部分
+    current_part = 'set'
+    current_content = ''
+    depth = 0
+    
+    while i < len(statement):
+        char = statement[i]
+        
+        # 跟踪括号深度
+        if char == '(':
+            depth += 1
+            current_content += char
+        elif char == ')':
+            depth -= 1
+            current_content += char
+        elif depth == 0:
+            # 只在深度为 0 时检查关键字
+            remaining = statement[i:].upper()
+            
+            if remaining.startswith('WHERE '):
+                parts[current_part] = current_content.strip()
+                current_part = 'where'
+                current_content = ''
+                i += 6  # len('WHERE ')
+                continue
+            else:
+                current_content += char
+        else:
+            current_content += char
+        
+        i += 1
+    
+    # 保存最后一部分
+    if current_content.strip():
+        parts[current_part] = current_content.strip()
+    
+    return parts
 
 
 def format_delete(statement: str) -> str:
