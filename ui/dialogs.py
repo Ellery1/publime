@@ -7,7 +7,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QTextEdit, QFileDialog, QListWidget,
-    QListWidgetItem, QGroupBox, QMessageBox
+    QListWidgetItem, QGroupBox, QMessageBox, QButtonGroup, QRadioButton
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
@@ -55,14 +55,35 @@ class FindDialog(QDialog):
         replace_layout.addWidget(self.replace_input)
         layout.addLayout(replace_layout)
         
-        # 选项
-        options_layout = QHBoxLayout()
+        # 选项 - 第一行
+        options_layout1 = QHBoxLayout()
         self.case_sensitive_cb = QCheckBox("区分大小写")
         self.regex_cb = QCheckBox("正则表达式")
-        options_layout.addWidget(self.case_sensitive_cb)
-        options_layout.addWidget(self.regex_cb)
-        options_layout.addStretch()
-        layout.addLayout(options_layout)
+        options_layout1.addWidget(self.case_sensitive_cb)
+        options_layout1.addWidget(self.regex_cb)
+        options_layout1.addStretch()
+        layout.addLayout(options_layout1)
+        
+        # 选项 - 第二行（匹配模式）
+        options_layout2 = QHBoxLayout()
+        options_layout2.addWidget(QLabel("匹配模式:"))
+        
+        # 创建互斥的单选按钮组
+        self.match_mode_group = QButtonGroup(self)
+        
+        self.fuzzy_match_rb = QRadioButton("模糊匹配")
+        self.fuzzy_match_rb.setChecked(True)  # 默认模糊匹配
+        self.fuzzy_match_rb.toggled.connect(self.on_match_mode_changed)
+        self.match_mode_group.addButton(self.fuzzy_match_rb)
+        options_layout2.addWidget(self.fuzzy_match_rb)
+        
+        self.exact_match_rb = QRadioButton("精确匹配")
+        self.exact_match_rb.toggled.connect(self.on_match_mode_changed)
+        self.match_mode_group.addButton(self.exact_match_rb)
+        options_layout2.addWidget(self.exact_match_rb)
+        
+        options_layout2.addStretch()
+        layout.addLayout(options_layout2)
         
         # 匹配计数标签
         self.match_count_label = QLabel("匹配: 0")
@@ -96,6 +117,10 @@ class FindDialog(QDialog):
         self.current_editor = editor
         self.update_search()
     
+    def on_match_mode_changed(self):
+        """匹配模式改变时"""
+        self.update_search()
+    
     def on_find_text_changed(self):
         """查找文本改变时"""
         self.update_search()
@@ -116,14 +141,32 @@ class FindDialog(QDialog):
         # 获取编辑器文本
         text = self.current_editor.toPlainText()
         
+        # 判断是否精确匹配
+        is_exact_match = self.exact_match_rb.isChecked()
+        
         # 执行搜索
         try:
-            self.matches = self.search_engine.find_in_text(
-                text,
-                pattern,
-                case_sensitive=self.case_sensitive_cb.isChecked(),
-                regex=self.regex_cb.isChecked()
-            )
+            if is_exact_match:
+                # 精确匹配：使用正则表达式的单词边界
+                import re
+                # 转义特殊字符
+                escaped_pattern = re.escape(pattern)
+                # 添加单词边界
+                regex_pattern = r'\b' + escaped_pattern + r'\b'
+                self.matches = self.search_engine.find_in_text(
+                    text,
+                    regex_pattern,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    regex=True  # 精确匹配使用正则表达式
+                )
+            else:
+                # 模糊匹配：正常搜索
+                self.matches = self.search_engine.find_in_text(
+                    text,
+                    pattern,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    regex=self.regex_cb.isChecked()
+                )
             
             # 更新匹配计数
             count = len(self.matches)
