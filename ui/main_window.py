@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QApplication, QPlainTextEdit, QComboBox, QLabel
 )
 from PySide6.QtCore import Qt, QUrl, Signal, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor
+from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QIcon
 from ui.tab_widget import TabWidget
 from ui.editor_pane import EditorPane
 from ui.dialogs import FindDialog, FindInFilesDialog
@@ -50,6 +50,11 @@ class MainWindow(QMainWindow):
         # 设置窗口
         self.setWindowTitle("Publime - 文本编辑器")
         self.resize(1200, 800)
+        
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(__file__), 'sekiro.icon')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # 启用拖放
         self.setAcceptDrops(True)
@@ -190,34 +195,31 @@ class MainWindow(QMainWindow):
         # 编辑菜单
         edit_menu = menubar.addMenu("编辑(&E)")
         
-        undo_action = QAction("撤销(&U)", self)
+        # 创建快捷键但不添加到菜单（保留功能和快捷键）
+        undo_action = QAction(self)
         undo_action.setShortcut(QKeySequence.Undo)
         undo_action.triggered.connect(self.undo)
-        edit_menu.addAction(undo_action)
+        self.addAction(undo_action)
         
-        redo_action = QAction("重做(&R)", self)
+        redo_action = QAction(self)
         redo_action.setShortcut(QKeySequence.Redo)
         redo_action.triggered.connect(self.redo)
-        edit_menu.addAction(redo_action)
+        self.addAction(redo_action)
         
-        edit_menu.addSeparator()
-        
-        cut_action = QAction("剪切(&T)", self)
+        cut_action = QAction(self)
         cut_action.setShortcut(QKeySequence.Cut)
         cut_action.triggered.connect(self.cut)
-        edit_menu.addAction(cut_action)
+        self.addAction(cut_action)
         
-        copy_action = QAction("复制(&C)", self)
+        copy_action = QAction(self)
         copy_action.setShortcut(QKeySequence.Copy)
         copy_action.triggered.connect(self.copy)
-        edit_menu.addAction(copy_action)
+        self.addAction(copy_action)
         
-        paste_action = QAction("粘贴(&P)", self)
+        paste_action = QAction(self)
         paste_action.setShortcut(QKeySequence.Paste)
         paste_action.triggered.connect(self.paste)
-        edit_menu.addAction(paste_action)
-        
-        edit_menu.addSeparator()
+        self.addAction(paste_action)
         
         # 自动换行选项
         self.word_wrap_action = QAction("自动换行(&W)", self)
