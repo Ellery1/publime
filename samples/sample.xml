@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XML 示例文件 -->
+<!-- 演示XML格式 -->
+
+<company>
+    <name>Tech Solutions Inc.</name>
+    <founded>2010</founded>
+    <headquarters>
+        <address>
+            <street>123 Main Street</street>
+            <city>San Francisco</city>
+            <state>CA</state>
+            <zip>94102</zip>
+            <country>USA</country>
+        </address>
+    </headquarters>
+    
+    <departments>
+        <department id="1">
+            <name>Engineering</name>
+            <location>San Francisco</location>
+            <budget currency="USD">1000000</budget>
+            <employees>
+                <employee id="101">
+                    <firstName>John</firstName>
+                    <lastName>Doe</lastName>
+                    <email>john.doe@company.com</email>
+                    <phone>555-0101</phone>
+                    <position>Senior Engineer</position>
+                    <salary currency="USD">95000</salary>
+                    <hireDate>2020-01-15</hireDate>
+                    <skills>
+                        <skill level="expert">Python</skill>
+                        <skill level="advanced">Java</skill>
+                        <skill level="intermediate">JavaScript</skill>
+                    </skills>
+                </employee>
+                <employee id="102">
+                    <firstName>Jane</firstName>
+                    <lastName>Smith</lastName>
+                    <email>jane.smith@company.com</email>
+                    <phone>555-0102</phone>
+                    <position>Lead Engineer</position>
+                    <salary currency="USD">110000</salary>
+                    <hireDate>2019-03-20</hireDate>
+                    <skills>
+                        <skill level="expert">Java</skill>
+                        <skill level="expert">Kotlin</skill>
+                        <skill level="advanced">SQL</skill>
+                    </skills>
+                </employee>
+            </employees>
+        </department>
+        
+        <department id="2">
+            <name>Sales</name>
+            <location>New York</location>
+            <budget currency="USD">500000</budget>
+            <employees>
+                <employee id="201">
+                    <firstName>Bob</firstName>
+                    <lastName>Johnson</lastName>
+                    <email>bob.johnson@company.com</email>
+                    <phone>555-0201</phone>
+                    <position>Sales Manager</position>
+                    <salary currency="USD">85000</salary>
+                    <hireDate>2021-06-10</hireDate>
+                </employee>
+            </employees>
+        </department>
+    </departments>
+    
+    <projects>
+        <project id="P001" status="active">
+            <name>Cloud Migration</name>
+            <description>Migrate legacy systems to cloud infrastructure</description>
+            <startDate>2023-01-01</startDate>
+            <endDate>2023-12-31</endDate>
+            <budget currency="USD">500000</budget>
+            <team>
+                <member employeeId="101" role="Lead Developer"/>
+                <member employeeId="102" role="Architect"/>
+            </team>
+            <milestones>
+                <milestone id="M1" completed="true">
+                    <name>Requirements Analysis</name>
+                    <dueDate>2023-03-31</dueDate>
+                </milestone>
+                <milestone id="M2" completed="false">
+                    <name>Implementation</name>
+                    <dueDate>2023-09-30</dueDate>
+                </milestone>
+            </milestones>
+        </project>
+    </projects>
+</company>

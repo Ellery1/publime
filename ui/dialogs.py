@@ -1,0 +1,476 @@
+"""
+对话框模块
+
+提供查找/替换对话框和跨文件搜索对话框。
+"""
+
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QCheckBox, QTextEdit, QFileDialog, QListWidget,
+    QListWidgetItem, QGroupBox, QMessageBox
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from core.search_engine import SearchEngine, Match
+from typing import Optional, List
+
+
+class FindDialog(QDialog):
+    """查找/替换对话框"""
+    
+    # 信号
+    find_next = Signal()
+    find_previous = Signal()
+    replace_current = Signal()
+    replace_all = Signal()
+    
+    def __init__(self, parent=None):
+        """初始化查找对话框"""
+        super().__init__(parent)
+        self.search_engine = SearchEngine()
+        self.current_editor = None
+        self.matches = []
+        self.current_match_index = -1
+        
+        self.setup_ui()
+        self.setWindowTitle("查找和替换")
+        self.resize(500, 200)
+    
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout()
+        
+        # 查找输入
+        find_layout = QHBoxLayout()
+        find_layout.addWidget(QLabel("查找:"))
+        self.find_input = QLineEdit()
+        self.find_input.textChanged.connect(self.on_find_text_changed)
+        find_layout.addWidget(self.find_input)
+        layout.addLayout(find_layout)
+        
+        # 替换输入
+        replace_layout = QHBoxLayout()
+        replace_layout.addWidget(QLabel("替换:"))
+        self.replace_input = QLineEdit()
+        replace_layout.addWidget(self.replace_input)
+        layout.addLayout(replace_layout)
+        
+        # 选项
+        options_layout = QHBoxLayout()
+        self.case_sensitive_cb = QCheckBox("区分大小写")
+        self.regex_cb = QCheckBox("正则表达式")
+        options_layout.addWidget(self.case_sensitive_cb)
+        options_layout.addWidget(self.regex_cb)
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+        
+        # 匹配计数标签
+        self.match_count_label = QLabel("匹配: 0")
+        layout.addWidget(self.match_count_label)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        
+        self.find_next_btn = QPushButton("查找下一个")
+        self.find_next_btn.clicked.connect(self.on_find_next)
+        button_layout.addWidget(self.find_next_btn)
+        
+        self.find_prev_btn = QPushButton("查找上一个")
+        self.find_prev_btn.clicked.connect(self.on_find_previous)
+        button_layout.addWidget(self.find_prev_btn)
+        
+        self.replace_btn = QPushButton("替换")
+        self.replace_btn.clicked.connect(self.on_replace_current)
+        button_layout.addWidget(self.replace_btn)
+        
+        self.replace_all_btn = QPushButton("全部替换")
+        self.replace_all_btn.clicked.connect(self.on_replace_all)
+        button_layout.addWidget(self.replace_all_btn)
+        
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+    
+    def set_editor(self, editor):
+        """设置当前编辑器"""
+        self.current_editor = editor
+        self.update_search()
+    
+    def on_find_text_changed(self):
+        """查找文本改变时"""
+        self.update_search()
+    
+    def update_search(self):
+        """更新搜索结果"""
+        if not self.current_editor:
+            return
+        
+        pattern = self.find_input.text()
+        if not pattern:
+            self.matches = []
+            self.current_match_index = -1
+            self.match_count_label.setText("匹配: 0")
+            self.clear_highlights()
+            return
+        
+        # 获取编辑器文本
+        text = self.current_editor.toPlainText()
+        
+        # 执行搜索
+        try:
+            self.matches = self.search_engine.find_in_text(
+                text,
+                pattern,
+                case_sensitive=self.case_sensitive_cb.isChecked(),
+                regex=self.regex_cb.isChecked()
+            )
+            
+            # 更新匹配计数
+            count = len(self.matches)
+            if count > 0 and self.current_match_index >= 0:
+                self.match_count_label.setText(
+                    f"匹配: {self.current_match_index + 1}/{count}"
+                )
+            else:
+                self.match_count_label.setText(f"匹配: {count}")
+            
+            # 高亮所有匹配项
+            self.highlight_all_matches()
+            
+            # 如果有匹配项，跳转到第一个
+            if count > 0:
+                self.current_match_index = 0
+                self.jump_to_match(0)
+        
+        except ValueError as e:
+            # 正则表达式错误
+            self.match_count_label.setText(f"错误: {str(e)}")
+            self.matches = []
+            self.current_match_index = -1
+    
+    def highlight_all_matches(self):
+        """高亮所有匹配项"""
+        if not self.current_editor:
+            return
+        
+        # 清除之前的高亮
+        self.clear_highlights()
+        
+        # 创建高亮格式
+        highlight_format = QTextCharFormat()
+        highlight_format.setBackground(QColor(255, 255, 0, 100))  # 黄色半透明
+        
+        # 高亮每个匹配项
+        cursor = self.current_editor.textCursor()
+        for match in self.matches:
+            cursor.setPosition(match.start_pos)
+            cursor.setPosition(match.end_pos, QTextCursor.KeepAnchor)
+            cursor.mergeCharFormat(highlight_format)
+    
+    def clear_highlights(self):
+        """清除高亮"""
+        if not self.current_editor:
+            return
+        
+        cursor = self.current_editor.textCursor()
+        cursor.select(QTextCursor.Document)
+        
+        # 重置格式
+        format = QTextCharFormat()
+        cursor.setCharFormat(format)
+        
+        # 恢复光标位置
+        cursor.clearSelection()
+        self.current_editor.setTextCursor(cursor)
+    
+    def jump_to_match(self, index: int):
+        """跳转到指定匹配项"""
+        if not self.current_editor or not self.matches:
+            return
+        
+        if 0 <= index < len(self.matches):
+            match = self.matches[index]
+            cursor = self.current_editor.textCursor()
+            cursor.setPosition(match.start_pos)
+            cursor.setPosition(match.end_pos, QTextCursor.KeepAnchor)
+            self.current_editor.setTextCursor(cursor)
+            self.current_editor.ensureCursorVisible()
+            
+            self.current_match_index = index
+            self.match_count_label.setText(
+                f"匹配: {index + 1}/{len(self.matches)}"
+            )
+    
+    def on_find_next(self):
+        """查找下一个"""
+        if not self.matches:
+            return
+        
+        next_index = (self.current_match_index + 1) % len(self.matches)
+        self.jump_to_match(next_index)
+    
+    def on_find_previous(self):
+        """查找上一个"""
+        if not self.matches:
+            return
+        
+        prev_index = (self.current_match_index - 1) % len(self.matches)
+        self.jump_to_match(prev_index)
+    
+    def on_replace_current(self):
+        """替换当前匹配项"""
+        if not self.current_editor or not self.matches:
+            return
+        
+        if self.current_match_index < 0 or self.current_match_index >= len(self.matches):
+            return
+        
+        # 获取当前匹配项
+        match = self.matches[self.current_match_index]
+        replacement = self.replace_input.text()
+        
+        # 替换文本
+        cursor = self.current_editor.textCursor()
+        cursor.setPosition(match.start_pos)
+        cursor.setPosition(match.end_pos, QTextCursor.KeepAnchor)
+        cursor.insertText(replacement)
+        
+        # 更新搜索（因为文本已改变）
+        self.update_search()
+    
+    def on_replace_all(self):
+        """全部替换"""
+        if not self.current_editor:
+            return
+        
+        pattern = self.find_input.text()
+        replacement = self.replace_input.text()
+        
+        if not pattern:
+            return
+        
+        # 获取编辑器文本
+        text = self.current_editor.toPlainText()
+        
+        # 执行替换
+        try:
+            new_text, count = self.search_engine.replace_in_text(
+                text,
+                pattern,
+                replacement,
+                case_sensitive=self.case_sensitive_cb.isChecked(),
+                regex=self.regex_cb.isChecked(),
+                replace_all=True
+            )
+            
+            # 更新编辑器文本
+            self.current_editor.setPlainText(new_text)
+            
+            # 显示替换结果
+            QMessageBox.information(
+                self,
+                "替换完成",
+                f"已替换 {count} 处"
+            )
+            
+            # 更新搜索
+            self.update_search()
+        
+        except ValueError as e:
+            QMessageBox.warning(self, "错误", str(e))
+    
+    def showEvent(self, event):
+        """对话框显示时"""
+        super().showEvent(event)
+        self.find_input.setFocus()
+        self.find_input.selectAll()
+
+
+class FindInFilesDialog(QDialog):
+    """跨文件搜索对话框"""
+    
+    # 信号：当用户点击搜索结果时发出 (file_path, line_number, column)
+    result_clicked = Signal(str, int, int)
+    
+    def __init__(self, parent=None):
+        """初始化跨文件搜索对话框"""
+        super().__init__(parent)
+        self.search_engine = SearchEngine()
+        self.search_results = {}
+        
+        self.setup_ui()
+        self.setWindowTitle("在文件中查找")
+        self.resize(700, 500)
+    
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout()
+        
+        # 搜索输入组
+        search_group = QGroupBox("搜索")
+        search_layout = QVBoxLayout()
+        
+        # 查找输入
+        find_layout = QHBoxLayout()
+        find_layout.addWidget(QLabel("查找:"))
+        self.find_input = QLineEdit()
+        find_layout.addWidget(self.find_input)
+        search_layout.addLayout(find_layout)
+        
+        # 目录选择
+        dir_layout = QHBoxLayout()
+        dir_layout.addWidget(QLabel("目录:"))
+        self.dir_input = QLineEdit()
+        dir_layout.addWidget(self.dir_input)
+        self.browse_btn = QPushButton("浏览...")
+        self.browse_btn.clicked.connect(self.on_browse_directory)
+        dir_layout.addWidget(self.browse_btn)
+        search_layout.addLayout(dir_layout)
+        
+        # 文件类型过滤
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("文件类型:"))
+        self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText("例如: *.py, *.txt (留空搜索所有文件)")
+        filter_layout.addWidget(self.filter_input)
+        search_layout.addLayout(filter_layout)
+        
+        # 选项
+        options_layout = QHBoxLayout()
+        self.case_sensitive_cb = QCheckBox("区分大小写")
+        self.regex_cb = QCheckBox("正则表达式")
+        options_layout.addWidget(self.case_sensitive_cb)
+        options_layout.addWidget(self.regex_cb)
+        options_layout.addStretch()
+        search_layout.addLayout(options_layout)
+        
+        # 搜索按钮
+        self.search_btn = QPushButton("搜索")
+        self.search_btn.clicked.connect(self.on_search)
+        search_layout.addWidget(self.search_btn)
+        
+        search_group.setLayout(search_layout)
+        layout.addWidget(search_group)
+        
+        # 结果列表
+        results_group = QGroupBox("搜索结果")
+        results_layout = QVBoxLayout()
+        
+        self.results_list = QListWidget()
+        self.results_list.itemDoubleClicked.connect(self.on_result_double_clicked)
+        results_layout.addWidget(self.results_list)
+        
+        self.result_count_label = QLabel("结果: 0")
+        results_layout.addWidget(self.result_count_label)
+        
+        results_group.setLayout(results_layout)
+        layout.addWidget(results_group)
+        
+        self.setLayout(layout)
+    
+    def on_browse_directory(self):
+        """浏览目录"""
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "选择搜索目录",
+            self.dir_input.text()
+        )
+        
+        if directory:
+            self.dir_input.setText(directory)
+    
+    def on_search(self):
+        """执行搜索"""
+        pattern = self.find_input.text()
+        directory = self.dir_input.text()
+        
+        if not pattern:
+            QMessageBox.warning(self, "警告", "请输入搜索内容")
+            return
+        
+        if not directory:
+            QMessageBox.warning(self, "警告", "请选择搜索目录")
+            return
+        
+        # 验证目录是否存在
+        import os
+        if not os.path.exists(directory):
+            QMessageBox.warning(self, "目录不存在", f"目录不存在: {directory}")
+            return
+        
+        if not os.path.isdir(directory):
+            QMessageBox.warning(self, "无效目录", f"不是有效的目录: {directory}")
+            return
+        
+        # 解析文件类型过滤器
+        filter_text = self.filter_input.text().strip()
+        file_patterns = None
+        if filter_text:
+            file_patterns = [p.strip() for p in filter_text.split(',')]
+        
+        # 执行搜索
+        try:
+            self.search_btn.setEnabled(False)
+            self.search_btn.setText("搜索中...")
+            
+            self.search_results = self.search_engine.find_in_files(
+                directory,
+                pattern,
+                file_patterns=file_patterns,
+                case_sensitive=self.case_sensitive_cb.isChecked(),
+                regex=self.regex_cb.isChecked()
+            )
+            
+            # 显示结果
+            self.display_results()
+        
+        except ValueError as e:
+            # 无效的正则表达式
+            QMessageBox.warning(self, "正则表达式错误", f"无效的正则表达式: {str(e)}")
+        except PermissionError as e:
+            QMessageBox.warning(self, "权限不足", f"没有访问权限: {str(e)}")
+        except Exception as e:
+            QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
+        
+        finally:
+            self.search_btn.setEnabled(True)
+            self.search_btn.setText("搜索")
+    
+    def display_results(self):
+        """显示搜索结果"""
+        self.results_list.clear()
+        
+        total_matches = 0
+        
+        # 按文件分组显示
+        for file_path, matches in self.search_results.items():
+            # 添加文件名作为分组标题
+            file_item = QListWidgetItem(f"📄 {file_path} ({len(matches)} 个匹配)")
+            file_item.setData(Qt.UserRole, None)  # 标记为文件标题
+            self.results_list.addItem(file_item)
+            
+            # 添加每个匹配项
+            for match in matches:
+                match_text = f"    行 {match.line_number}: {match.line_content.strip()}"
+                match_item = QListWidgetItem(match_text)
+                match_item.setData(Qt.UserRole, (file_path, match.line_number, match.column))
+                self.results_list.addItem(match_item)
+                total_matches += 1
+        
+        # 更新结果计数
+        self.result_count_label.setText(
+            f"结果: {len(self.search_results)} 个文件, {total_matches} 个匹配"
+        )
+    
+    def on_result_double_clicked(self, item: QListWidgetItem):
+        """双击结果项"""
+        data = item.data(Qt.UserRole)
+        
+        if data is not None:
+            file_path, line_number, column = data
+            self.result_clicked.emit(file_path, line_number, column)
+    
+    def showEvent(self, event):
+        """对话框显示时"""
+        super().showEvent(event)
+        self.find_input.setFocus()

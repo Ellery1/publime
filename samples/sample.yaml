@@ -1,0 +1,126 @@
+# YAML 示例文件
+# 演示YAML格式
+
+company:
+  name: Tech Solutions Inc.
+  founded: 2010
+  headquarters:
+    address:
+      street: 123 Main Street
+      city: San Francisco
+      state: CA
+      zip: 94102
+      country: USA
+
+departments:
+  - id: 1
+    name: Engineering
+    location: San Francisco
+    budget:
+      amount: 1000000
+      currency: USD
+    employees:
+      - id: 101
+        firstName: John
+        lastName: Doe
+        email: john.doe@company.com
+        phone: 555-0101
+        position: Senior Engineer
+        salary:
+          amount: 95000
+          currency: USD
+        hireDate: 2020-01-15
+        skills:
+          - name: Python
+            level: expert
+          - name: Java
+            level: advanced
+          - name: JavaScript
+            level: intermediate
+      
+      - id: 102
+        firstName: Jane
+        lastName: Smith
+        email: jane.smith@company.com
+        phone: 555-0102
+        position: Lead Engineer
+        salary:
+          amount: 110000
+          currency: USD
+        hireDate: 2019-03-20
+        skills:
+          - name: Java
+            level: expert
+          - name: Kotlin
+            level: expert
+          - name: SQL
+            level: advanced
+  
+  - id: 2
+    name: Sales
+    location: New York
+    budget:
+      amount: 500000
+      currency: USD
+    employees:
+      - id: 201
+        firstName: Bob
+        lastName: Johnson
+        email: bob.johnson@company.com
+        phone: 555-0201
+        position: Sales Manager
+        salary:
+          amount: 85000
+          currency: USD
+        hireDate: 2021-06-10
+
+projects:
+  - id: P001
+    name: Cloud Migration
+    description: Migrate legacy systems to cloud infrastructure
+    status: active
+    startDate: 2023-01-01
+    endDate: 2023-12-31
+    budget:
+      amount: 500000
+      currency: USD
+    team:
+      - employeeId: 101
+        role: Lead Developer
+      - employeeId: 102
+        role: Architect
+    milestones:
+      - id: M1
+        name: Requirements Analysis
+        dueDate: 2023-03-31
+        completed: true
+      - id: M2
+        name: Implementation
+        dueDate: 2023-09-30
+        completed: false
+
+# 配置示例
+config:
+  database:
+    host: localhost
+    port: 5432
+    name: company_db
+    credentials:
+      username: admin
+      password: secret123
+  
+  cache:
+    enabled: true
+    ttl: 3600
+    provider: redis
+    
+  features:
+    - authentication
+    - authorization
+    - logging
+    - monitoring
+  
+  settings:
+    debug: false
+    logLevel: info
+    maxConnections: 100
