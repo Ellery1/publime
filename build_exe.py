@@ -24,6 +24,7 @@ args = [
     '--windowed',                       # 不显示控制台窗口
     f'--icon={icon_path}',              # 程序图标
     '--onefile',                        # 打包成单个文件
+    '--noupx',                          # 不使用 UPX 压缩（避免解压错误）
     '--clean',                          # 清理临时文件
     '--noconfirm',                      # 不询问确认
     # 添加数据文件（Windows 使用分号）
@@ -32,6 +33,7 @@ args = [
     '--hidden-import=PySide6.QtCore',
     '--hidden-import=PySide6.QtGui',
     '--hidden-import=PySide6.QtWidgets',
+    '--hidden-import=PySide6.QtNetwork',  # 添加网络模块
 ]
 
 print(f"PyInstaller 参数: {' '.join(args)}")
