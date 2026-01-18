@@ -50,25 +50,20 @@ temp/
 tmp/
 history.json
 
-# Temporary test files
-test_*.py
-!tests/test_*.py
-demo_*.py
-compare_output.py
-recreate_syntax_highlighter.py
-verify_*.py
-fix_main_window*.py
+# PyInstaller
+*.spec
+build/
+dist/
 
-# Temporary output files
-*_formatted.sql
-actual_output.txt
-expected_output.txt
-test_drag_drop.txt
-test_markdown_improvements.md
+# Kiro specs
+.kiro/
 
-# Development documentation (optional - uncomment if you don't want to track these)
-# *_SUMMARY.md
-# *_INSTRUCTIONS.md
-# *_REPORT.md
-# *_FIX.md
-# *_IMPROVEMENTS.md
+# Development documentation
+*_SUMMARY.md
+*_INSTRUCTIONS.md
+*_REPORT.md
+*_FIX.md
+*_IMPROVEMENTS.md
+*_FEATURE.md
+RELEASE_NOTES.md
+
