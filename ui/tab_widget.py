@@ -274,17 +274,26 @@ class TabWidget(QTabWidget):
         # 设置标签页标题
         self.setTabText(index, title)
     
-    def update_tab_title(self, index: int, title: str):
+    def update_tab_title(self, index: int, title: str = None):
         """
         更新标签页标题（公共方法）
         
         Args:
             index: 标签页索引
-            title: 新标题
+            title: 新标题（可选，如果不提供则从编辑器文件路径获取）
         """
         if 0 <= index < self.count():
             editor = self.get_editor_at(index)
             if editor:
+                # 如果没有提供 title，从编辑器获取
+                if title is None:
+                    file_path = editor.get_file_path()
+                    if file_path:
+                        import os
+                        title = os.path.basename(file_path)
+                    else:
+                        title = "未命名"
+                
                 modified = editor.is_modified()
                 if modified:
                     title = f"{title} *"
