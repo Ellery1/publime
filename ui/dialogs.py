@@ -58,7 +58,9 @@ class FindDialog(QDialog):
         # 选项 - 第一行
         options_layout1 = QHBoxLayout()
         self.case_sensitive_cb = QCheckBox("区分大小写")
+        self.case_sensitive_cb.toggled.connect(self.on_option_changed)  # 添加信号连接
         self.regex_cb = QCheckBox("正则表达式")
+        self.regex_cb.toggled.connect(self.on_option_changed)  # 添加信号连接
         options_layout1.addWidget(self.case_sensitive_cb)
         options_layout1.addWidget(self.regex_cb)
         options_layout1.addStretch()
@@ -119,6 +121,10 @@ class FindDialog(QDialog):
     
     def on_match_mode_changed(self):
         """匹配模式改变时"""
+        self.update_search()
+    
+    def on_option_changed(self):
+        """选项改变时（区分大小写、正则表达式）"""
         self.update_search()
     
     def on_find_text_changed(self):
