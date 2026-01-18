@@ -297,10 +297,11 @@ class FindInFilesDialog(QDialog):
         super().__init__(parent)
         self.search_engine = SearchEngine()
         self.search_results = {}
+        self.file_name_results = []  # 文件名搜索结果
         
         self.setup_ui()
         self.setWindowTitle("在文件中查找")
-        self.resize(700, 500)
+        self.resize(700, 550)
     
     def setup_ui(self):
         """设置UI"""
@@ -335,14 +336,35 @@ class FindInFilesDialog(QDialog):
         filter_layout.addWidget(self.filter_input)
         search_layout.addLayout(filter_layout)
         
-        # 选项
-        options_layout = QHBoxLayout()
+        # 搜索模式选项（第一行）
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("搜索模式:"))
+        self.search_content_cb = QCheckBox("搜索文件内容")
+        self.search_content_cb.setChecked(True)  # 默认搜索内容
+        self.search_filename_cb = QCheckBox("搜索文件名")
+        mode_layout.addWidget(self.search_content_cb)
+        mode_layout.addWidget(self.search_filename_cb)
+        mode_layout.addStretch()
+        search_layout.addLayout(mode_layout)
+        
+        # 匹配选项（第二行）
+        match_layout = QHBoxLayout()
+        match_layout.addWidget(QLabel("匹配选项:"))
+        self.fuzzy_match_cb = QCheckBox("模糊匹配")
+        self.fuzzy_match_cb.setChecked(True)  # 默认模糊匹配
+        self.exact_match_cb = QCheckBox("精确匹配")
         self.case_sensitive_cb = QCheckBox("区分大小写")
         self.regex_cb = QCheckBox("正则表达式")
-        options_layout.addWidget(self.case_sensitive_cb)
-        options_layout.addWidget(self.regex_cb)
-        options_layout.addStretch()
-        search_layout.addLayout(options_layout)
+        match_layout.addWidget(self.fuzzy_match_cb)
+        match_layout.addWidget(self.exact_match_cb)
+        match_layout.addWidget(self.case_sensitive_cb)
+        match_layout.addWidget(self.regex_cb)
+        match_layout.addStretch()
+        search_layout.addLayout(match_layout)
+        
+        # 连接互斥选项
+        self.fuzzy_match_cb.toggled.connect(self.on_fuzzy_toggled)
+        self.exact_match_cb.toggled.connect(self.on_exact_toggled)
         
         # 搜索按钮
         self.search_btn = QPushButton("搜索")
@@ -379,6 +401,16 @@ class FindInFilesDialog(QDialog):
         if directory:
             self.dir_input.setText(directory)
     
+    def on_fuzzy_toggled(self, checked):
+        """模糊匹配切换"""
+        if checked:
+            self.exact_match_cb.setChecked(False)
+    
+    def on_exact_toggled(self, checked):
+        """精确匹配切换"""
+        if checked:
+            self.fuzzy_match_cb.setChecked(False)
+    
     def on_search(self):
         """执行搜索"""
         pattern = self.find_input.text()
@@ -402,24 +434,56 @@ class FindInFilesDialog(QDialog):
             QMessageBox.warning(self, "无效目录", f"不是有效的目录: {directory}")
             return
         
+        # 检查是否至少选择了一种搜索模式
+        search_content = self.search_content_cb.isChecked()
+        search_filename = self.search_filename_cb.isChecked()
+        
+        if not search_content and not search_filename:
+            QMessageBox.warning(self, "警告", "请至少选择一种搜索模式（文件内容或文件名）")
+            return
+        
         # 解析文件类型过滤器
         filter_text = self.filter_input.text().strip()
         file_patterns = None
         if filter_text:
             file_patterns = [p.strip() for p in filter_text.split(',')]
         
+        # 确定匹配模式
+        is_fuzzy = self.fuzzy_match_cb.isChecked()
+        is_exact = self.exact_match_cb.isChecked()
+        
+        # 如果两个都没选，默认使用模糊匹配
+        if not is_fuzzy and not is_exact:
+            is_fuzzy = True
+        
         # 执行搜索
         try:
             self.search_btn.setEnabled(False)
             self.search_btn.setText("搜索中...")
             
-            self.search_results = self.search_engine.find_in_files(
-                directory,
-                pattern,
-                file_patterns=file_patterns,
-                case_sensitive=self.case_sensitive_cb.isChecked(),
-                regex=self.regex_cb.isChecked()
-            )
+            # 清空之前的结果
+            self.search_results = {}
+            self.file_name_results = []
+            
+            # 搜索文件内容
+            if search_content:
+                self.search_results = self.search_engine.find_in_files(
+                    directory,
+                    pattern,
+                    file_patterns=file_patterns,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    regex=self.regex_cb.isChecked()
+                )
+            
+            # 搜索文件名
+            if search_filename:
+                self.file_name_results = self.search_file_names(
+                    directory,
+                    pattern,
+                    file_patterns=file_patterns,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    exact_match=is_exact
+                )
             
             # 显示结果
             self.display_results()
@@ -436,30 +500,116 @@ class FindInFilesDialog(QDialog):
             self.search_btn.setEnabled(True)
             self.search_btn.setText("搜索")
     
+    def search_file_names(self, directory: str, pattern: str, file_patterns=None, 
+                          case_sensitive=False, exact_match=False) -> List[str]:
+        """
+        搜索文件名
+        
+        Args:
+            directory: 搜索目录
+            pattern: 搜索模式
+            file_patterns: 文件类型过滤器
+            case_sensitive: 是否区分大小写
+            exact_match: 是否精确匹配
+        
+        Returns:
+            匹配的文件路径列表
+        """
+        import os
+        import fnmatch
+        
+        results = []
+        
+        # 准备搜索模式
+        search_pattern = pattern if case_sensitive else pattern.lower()
+        
+        # 遍历目录
+        for root, dirs, files in os.walk(directory):
+            for filename in files:
+                # 应用文件类型过滤
+                if file_patterns:
+                    match_filter = False
+                    for fp in file_patterns:
+                        if fnmatch.fnmatch(filename, fp):
+                            match_filter = True
+                            break
+                    if not match_filter:
+                        continue
+                
+                # 准备文件名用于比较
+                compare_name = filename if case_sensitive else filename.lower()
+                
+                # 匹配检查
+                matched = False
+                if exact_match:
+                    # 精确匹配：文件名必须完全等于搜索模式
+                    matched = (compare_name == search_pattern)
+                else:
+                    # 模糊匹配：文件名包含搜索模式
+                    matched = (search_pattern in compare_name)
+                
+                if matched:
+                    file_path = os.path.join(root, filename)
+                    results.append(file_path)
+        
+        return results
+    
     def display_results(self):
         """显示搜索结果"""
         self.results_list.clear()
         
         total_matches = 0
         
-        # 按文件分组显示
-        for file_path, matches in self.search_results.items():
-            # 添加文件名作为分组标题
-            file_item = QListWidgetItem(f"📄 {file_path} ({len(matches)} 个匹配)")
-            file_item.setData(Qt.UserRole, None)  # 标记为文件标题
-            self.results_list.addItem(file_item)
+        # 显示文件名搜索结果
+        if self.file_name_results:
+            # 添加文件名搜索结果标题
+            header_item = QListWidgetItem(f"📁 文件名匹配 ({len(self.file_name_results)} 个文件)")
+            header_item.setData(Qt.UserRole, None)
+            self.results_list.addItem(header_item)
             
-            # 添加每个匹配项
-            for match in matches:
-                match_text = f"    行 {match.line_number}: {match.line_content.strip()}"
-                match_item = QListWidgetItem(match_text)
-                match_item.setData(Qt.UserRole, (file_path, match.line_number, match.column))
-                self.results_list.addItem(match_item)
+            for file_path in self.file_name_results:
+                import os
+                file_item = QListWidgetItem(f"    📄 {file_path}")
+                # 文件名匹配时，双击打开文件第一行
+                file_item.setData(Qt.UserRole, (file_path, 1, 0))
+                self.results_list.addItem(file_item)
                 total_matches += 1
+            
+            # 添加分隔符
+            if self.search_results:
+                separator = QListWidgetItem("")
+                separator.setData(Qt.UserRole, None)
+                self.results_list.addItem(separator)
+        
+        # 显示文件内容搜索结果
+        if self.search_results:
+            # 添加文件内容搜索结果标题
+            content_matches = sum(len(matches) for matches in self.search_results.values())
+            header_item = QListWidgetItem(
+                f"📝 文件内容匹配 ({len(self.search_results)} 个文件, {content_matches} 处匹配)"
+            )
+            header_item.setData(Qt.UserRole, None)
+            self.results_list.addItem(header_item)
+            
+            # 按文件分组显示
+            for file_path, matches in self.search_results.items():
+                # 添加文件名作为分组标题
+                file_item = QListWidgetItem(f"    📄 {file_path} ({len(matches)} 个匹配)")
+                file_item.setData(Qt.UserRole, None)  # 标记为文件标题
+                self.results_list.addItem(file_item)
+                
+                # 添加每个匹配项
+                for match in matches:
+                    match_text = f"        行 {match.line_number}: {match.line_content.strip()}"
+                    match_item = QListWidgetItem(match_text)
+                    match_item.setData(Qt.UserRole, (file_path, match.line_number, match.column))
+                    self.results_list.addItem(match_item)
+                    total_matches += 1
         
         # 更新结果计数
+        file_count = len(self.file_name_results) + len(self.search_results)
         self.result_count_label.setText(
-            f"结果: {len(self.search_results)} 个文件, {total_matches} 个匹配"
+            f"结果: {file_count} 个文件, {total_matches} 处匹配"
         )
     
     def on_result_double_clicked(self, item: QListWidgetItem):
