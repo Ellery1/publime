@@ -259,7 +259,8 @@ class TestFindInFilesDialog:
             
             # 检查结果列表
             assert dialog.results_list.count() > 0
-            assert "2 个匹配" in dialog.result_count_label.text()
+            # 新格式：结果: 1 个文件, 2 处匹配
+            assert "2 处匹配" in dialog.result_count_label.text()
     
     def test_empty_search_pattern(self, app, qtbot):
         """测试空搜索模式"""
@@ -297,13 +298,168 @@ class TestFindInFilesDialog:
             dialog.dir_input.setText(tmpdir)
             dialog.on_search()
             
-            # 获取第一个匹配项（跳过文件标题）
-            if dialog.results_list.count() > 1:
-                match_item = dialog.results_list.item(1)
+            # 新的结果格式有标题行，需要跳过更多项
+            # 格式：标题 -> 文件名 -> 匹配行
+            if dialog.results_list.count() > 2:
+                match_item = dialog.results_list.item(2)  # 第3项是实际的匹配行
                 
                 # 测试信号
                 with qtbot.waitSignal(dialog.result_clicked, timeout=1000):
                     dialog.on_result_double_clicked(match_item)
+    
+    def test_search_filename_fuzzy(self, app):
+        """测试文件名模糊搜索"""
+        dialog = FindInFilesDialog()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建测试文件
+            file1 = os.path.join(tmpdir, "test_file.txt")
+            file2 = os.path.join(tmpdir, "another_test.py")
+            file3 = os.path.join(tmpdir, "no_match.txt")
+            
+            for f in [file1, file2, file3]:
+                with open(f, 'w', encoding='utf-8') as fp:
+                    fp.write("content")
+            
+            # 设置搜索参数：只搜索文件名，模糊匹配
+            dialog.find_input.setText("test")
+            dialog.dir_input.setText(tmpdir)
+            dialog.search_content_cb.setChecked(False)
+            dialog.search_filename_cb.setChecked(True)
+            dialog.fuzzy_match_cb.setChecked(True)
+            dialog.exact_match_cb.setChecked(False)
+            
+            dialog.on_search()
+            
+            # 应该找到包含 "test" 的文件名
+            assert len(dialog.file_name_results) == 2
+            assert file1 in dialog.file_name_results
+            assert file2 in dialog.file_name_results
+            assert file3 not in dialog.file_name_results
+    
+    def test_search_filename_exact(self, app):
+        """测试文件名精确搜索"""
+        dialog = FindInFilesDialog()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建测试文件
+            file1 = os.path.join(tmpdir, "test.txt")
+            file2 = os.path.join(tmpdir, "test_file.txt")
+            
+            for f in [file1, file2]:
+                with open(f, 'w', encoding='utf-8') as fp:
+                    fp.write("content")
+            
+            # 设置搜索参数：只搜索文件名，精确匹配
+            dialog.find_input.setText("test.txt")
+            dialog.dir_input.setText(tmpdir)
+            dialog.search_content_cb.setChecked(False)
+            dialog.search_filename_cb.setChecked(True)
+            dialog.fuzzy_match_cb.setChecked(False)
+            dialog.exact_match_cb.setChecked(True)
+            
+            dialog.on_search()
+            
+            # 应该只找到完全匹配的文件名
+            assert len(dialog.file_name_results) == 1
+            assert file1 in dialog.file_name_results
+            assert file2 not in dialog.file_name_results
+    
+    def test_search_both_modes(self, app):
+        """测试同时搜索文件名和内容"""
+        dialog = FindInFilesDialog()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建测试文件
+            file1 = os.path.join(tmpdir, "hello.txt")
+            file2 = os.path.join(tmpdir, "world.txt")
+            
+            with open(file1, 'w', encoding='utf-8') as f:
+                f.write("some content")
+            
+            with open(file2, 'w', encoding='utf-8') as f:
+                f.write("hello world")
+            
+            # 设置搜索参数：同时搜索文件名和内容
+            dialog.find_input.setText("hello")
+            dialog.dir_input.setText(tmpdir)
+            dialog.search_content_cb.setChecked(True)
+            dialog.search_filename_cb.setChecked(True)
+            dialog.fuzzy_match_cb.setChecked(True)
+            
+            dialog.on_search()
+            
+            # 应该找到文件名匹配（file1）和内容匹配（file2）
+            assert len(dialog.file_name_results) == 1  # hello.txt
+            assert file1 in dialog.file_name_results
+            assert len(dialog.search_results) == 1  # world.txt 包含 "hello"
+            assert file2 in dialog.search_results
+    
+    def test_fuzzy_exact_mutual_exclusion(self, app):
+        """测试模糊匹配和精确匹配互斥"""
+        dialog = FindInFilesDialog()
+        
+        # 默认模糊匹配应该被选中
+        assert dialog.fuzzy_match_cb.isChecked()
+        assert not dialog.exact_match_cb.isChecked()
+        
+        # 选中精确匹配，模糊匹配应该取消
+        dialog.exact_match_cb.setChecked(True)
+        assert not dialog.fuzzy_match_cb.isChecked()
+        assert dialog.exact_match_cb.isChecked()
+        
+        # 选中模糊匹配，精确匹配应该取消
+        dialog.fuzzy_match_cb.setChecked(True)
+        assert dialog.fuzzy_match_cb.isChecked()
+        assert not dialog.exact_match_cb.isChecked()
+    
+    def test_no_search_mode_selected(self, app):
+        """测试未选择搜索模式"""
+        dialog = FindInFilesDialog()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dialog.find_input.setText("test")
+            dialog.dir_input.setText(tmpdir)
+            
+            # 取消所有搜索模式
+            dialog.search_content_cb.setChecked(False)
+            dialog.search_filename_cb.setChecked(False)
+            
+            dialog.on_search()
+            
+            # 应该没有结果
+            assert len(dialog.search_results) == 0
+            assert len(dialog.file_name_results) == 0
+    
+    def test_search_filename_case_sensitive(self, app):
+        """测试文件名区分大小写搜索"""
+        dialog = FindInFilesDialog()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建测试文件 - Windows 文件系统不区分大小写，所以只能创建一个
+            # 我们改用不同的文件名来测试
+            file1 = os.path.join(tmpdir, "Test_File.txt")
+            file2 = os.path.join(tmpdir, "test_data.txt")
+            
+            for f in [file1, file2]:
+                with open(f, 'w', encoding='utf-8') as fp:
+                    fp.write("content")
+            
+            # 不区分大小写 - 搜索 "test"
+            dialog.find_input.setText("test")
+            dialog.dir_input.setText(tmpdir)
+            dialog.search_content_cb.setChecked(False)
+            dialog.search_filename_cb.setChecked(True)
+            dialog.case_sensitive_cb.setChecked(False)
+            
+            dialog.on_search()
+            assert len(dialog.file_name_results) == 2  # 两个文件都包含 "test"（不区分大小写）
+            
+            # 区分大小写 - 搜索 "test"
+            dialog.case_sensitive_cb.setChecked(True)
+            dialog.on_search()
+            assert len(dialog.file_name_results) == 1  # 只有 test_data.txt 匹配
+            assert file2 in dialog.file_name_results
 
 
 if __name__ == '__main__':
