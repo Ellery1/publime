@@ -188,32 +188,14 @@ def format_select(statement: str, indent_level: int = 0) -> str:
     base_indent = '  ' * indent_level
     item_indent = '  ' * (indent_level + 1)
     
-    # 提取各个部分
-    select_match = re.search(r'SELECT\s+(.*?)\s+FROM', statement, re.IGNORECASE | re.DOTALL)
-    select_cols = select_match.group(1) if select_match else '*'
-    
-    from_match = re.search(r'FROM\s+(.*?)(?:\s+WHERE|\s+GROUP BY|\s+HAVING|\s+ORDER BY|\s+LIMIT|$)', statement, re.IGNORECASE | re.DOTALL)
-    from_clause = from_match.group(1) if from_match else ''
-    
-    where_match = re.search(r'WHERE\s+(.*?)(?:\s+GROUP BY|\s+HAVING|\s+ORDER BY|\s+LIMIT|$)', statement, re.IGNORECASE | re.DOTALL)
-    where_clause = where_match.group(1) if where_match else ''
-    
-    groupby_match = re.search(r'GROUP BY\s+(.*?)(?:\s+HAVING|\s+ORDER BY|\s+LIMIT|$)', statement, re.IGNORECASE | re.DOTALL)
-    groupby_clause = groupby_match.group(1) if groupby_match else ''
-    
-    having_match = re.search(r'HAVING\s+(.*?)(?:\s+ORDER BY|\s+LIMIT|$)', statement, re.IGNORECASE | re.DOTALL)
-    having_clause = having_match.group(1) if having_match else ''
-    
-    orderby_match = re.search(r'ORDER BY\s+(.*?)(?:\s+LIMIT|$)', statement, re.IGNORECASE | re.DOTALL)
-    orderby_clause = orderby_match.group(1) if orderby_match else ''
-    
-    limit_match = re.search(r'LIMIT\s+(\d+)', statement, re.IGNORECASE)
-    limit_value = limit_match.group(1) if limit_match else ''
+    # 使用新的解析方法提取各个部分
+    parts = parse_select_statement(statement)
     
     # 构建结果
     result_lines = [f'{base_indent}SELECT']
     
     # 格式化列
+    select_cols = parts.get('select', '*')
     if select_cols.strip() == '*':
         result_lines.append(f'{item_indent}*')
     else:
@@ -240,6 +222,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                     result_lines.append(f'{item_indent}{col}')
     
     # FROM
+    from_clause = parts.get('from', '')
     if from_clause:
         result_lines.append(f'{base_indent}FROM')
         from_parts = split_joins(from_clause)
@@ -247,6 +230,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
             result_lines.append(f'{item_indent}{part}')
     
     # WHERE
+    where_clause = parts.get('where', '')
     if where_clause:
         result_lines.append(f'{base_indent}WHERE')
         where_conditions = split_and_conditions(where_clause)
@@ -265,6 +249,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                     result_lines.append(f'{item_indent}AND {cond}')
     
     # GROUP BY
+    groupby_clause = parts.get('group_by', '')
     if groupby_clause:
         result_lines.append(f'{base_indent}GROUP BY')
         groupby_items = [item.strip() for item in groupby_clause.split(',')]
@@ -275,6 +260,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 result_lines.append(f'{item_indent}{item}')
     
     # HAVING
+    having_clause = parts.get('having', '')
     if having_clause:
         result_lines.append(f'{base_indent}HAVING')
         having_conditions = split_and_conditions(having_clause)
@@ -285,6 +271,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 result_lines.append(f'{item_indent}AND {cond}')
     
     # ORDER BY
+    orderby_clause = parts.get('order_by', '')
     if orderby_clause:
         result_lines.append(f'{base_indent}ORDER BY')
         orderby_items = [item.strip() for item in orderby_clause.split(',')]
@@ -295,6 +282,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 result_lines.append(f'{item_indent}{item}')
     
     # LIMIT
+    limit_value = parts.get('limit', '')
     if indent_level == 0:
         if limit_value:
             result_lines.append(f'{base_indent}LIMIT {limit_value};')
@@ -307,6 +295,108 @@ def format_select(statement: str, indent_level: int = 0) -> str:
             result_lines.append(f'{base_indent}LIMIT {limit_value}')
     
     return '\n'.join(result_lines)
+
+
+def parse_select_statement(statement: str) -> dict:
+    """
+    解析 SELECT 语句，提取各个部分（考虑括号深度）
+    
+    Args:
+        statement: SELECT 语句
+        
+    Returns:
+        包含各部分的字典
+    """
+    parts = {
+        'select': '',
+        'from': '',
+        'where': '',
+        'group_by': '',
+        'having': '',
+        'order_by': '',
+        'limit': ''
+    }
+    
+    # 查找 SELECT 关键字
+    select_pos = statement.upper().find('SELECT')
+    if select_pos == -1:
+        return parts
+    
+    # 从 SELECT 后开始解析
+    i = select_pos + 6  # len('SELECT')
+    
+    # 跳过空白
+    while i < len(statement) and statement[i].isspace():
+        i += 1
+    
+    # 当前正在解析的部分
+    current_part = 'select'
+    current_content = ''
+    depth = 0
+    
+    while i < len(statement):
+        char = statement[i]
+        
+        # 跟踪括号深度
+        if char == '(':
+            depth += 1
+            current_content += char
+        elif char == ')':
+            depth -= 1
+            current_content += char
+        elif depth == 0:
+            # 只在深度为 0 时检查关键字
+            # 检查是否是关键字的开始
+            remaining = statement[i:].upper()
+            
+            if remaining.startswith('FROM '):
+                parts[current_part] = current_content.strip()
+                current_part = 'from'
+                current_content = ''
+                i += 5  # len('FROM ')
+                continue
+            elif remaining.startswith('WHERE '):
+                parts[current_part] = current_content.strip()
+                current_part = 'where'
+                current_content = ''
+                i += 6  # len('WHERE ')
+                continue
+            elif remaining.startswith('GROUP BY '):
+                parts[current_part] = current_content.strip()
+                current_part = 'group_by'
+                current_content = ''
+                i += 9  # len('GROUP BY ')
+                continue
+            elif remaining.startswith('HAVING '):
+                parts[current_part] = current_content.strip()
+                current_part = 'having'
+                current_content = ''
+                i += 7  # len('HAVING ')
+                continue
+            elif remaining.startswith('ORDER BY '):
+                parts[current_part] = current_content.strip()
+                current_part = 'order_by'
+                current_content = ''
+                i += 9  # len('ORDER BY ')
+                continue
+            elif remaining.startswith('LIMIT '):
+                parts[current_part] = current_content.strip()
+                current_part = 'limit'
+                current_content = ''
+                i += 6  # len('LIMIT ')
+                continue
+            else:
+                current_content += char
+        else:
+            current_content += char
+        
+        i += 1
+    
+    # 保存最后一部分
+    if current_content.strip():
+        parts[current_part] = current_content.strip()
+    
+    return parts
 
 
 def format_subquery_in_column(col: str, indent_level: int) -> str:
