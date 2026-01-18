@@ -458,12 +458,18 @@ class FindInFilesDialog(QDialog):
         
         # 执行搜索
         try:
-            self.search_btn.setEnabled(False)
-            self.search_btn.setText("搜索中...")
-            
             # 清空之前的结果
             self.search_results = {}
             self.file_name_results = []
+            self.results_list.clear()
+            self.result_count_label.setText("正在搜索中，请稍等...")
+            
+            # 禁用搜索按钮
+            self.search_btn.setEnabled(False)
+            self.search_btn.setText("搜索中...")
+            
+            # 强制刷新界面
+            QApplication.processEvents()
             
             # 搜索文件内容
             if search_content:
@@ -490,10 +496,16 @@ class FindInFilesDialog(QDialog):
         
         except ValueError as e:
             # 无效的正则表达式
+            self.results_list.clear()
+            self.result_count_label.setText("搜索失败")
             QMessageBox.warning(self, "正则表达式错误", f"无效的正则表达式: {str(e)}")
         except PermissionError as e:
+            self.results_list.clear()
+            self.result_count_label.setText("搜索失败")
             QMessageBox.warning(self, "权限不足", f"没有访问权限: {str(e)}")
         except Exception as e:
+            self.results_list.clear()
+            self.result_count_label.setText("搜索失败")
             QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
         
         finally:
