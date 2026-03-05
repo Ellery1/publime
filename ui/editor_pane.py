@@ -85,6 +85,11 @@ class EditorPane(QPlainTextEdit):
         # 多光标支持
         self.extra_cursors: List[QTextCursor] = []
         
+        # 列选择支持
+        self._column_selection_mode: bool = False
+        self._column_selection_start: Optional[QTextCursor] = None
+        self._column_selection_end: Optional[QTextCursor] = None
+        
         # 代码补全器
         self.code_completer = CodeCompleter(self)
         
@@ -133,6 +138,9 @@ class EditorPane(QPlainTextEdit):
             language = LanguageDetector.detect_language(path)
             if language:
                 self.set_language(language)
+        else:
+            # 无路径时，尝试基于内容检测
+            self.trigger_content_detection()
     
     def get_file_path(self) -> Optional[str]:
         """
@@ -162,6 +170,9 @@ class EditorPane(QPlainTextEdit):
         if self.syntax_highlighter is None:
             # 创建新的语法高亮器
             self.syntax_highlighter = SyntaxHighlighter(self.document(), language)
+            # 如果已经有主题，立即应用
+            if hasattr(self, '_current_theme'):
+                self.syntax_highlighter.apply_theme(self._current_theme)
         else:
             # 更新现有语法高亮器的语言
             self.syntax_highlighter.set_language(language)
@@ -322,6 +333,83 @@ class EditorPane(QPlainTextEdit):
         self.line_number_area.setGeometry(
             QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
         )
+    
+    def paintEvent(self, event: QPaintEvent):
+        """
+        处理绘制事件
+        
+        Args:
+            event: 绘制事件
+        """
+        # 先调用父类的绘制方法
+        super().paintEvent(event)
+        
+        # 如果处于列选择模式，绘制选择区域
+        if self._column_selection_mode and self._column_selection_start and self._column_selection_end:
+            self._draw_column_selection()
+    
+    def _draw_column_selection(self) -> None:
+        """绘制列选择区域"""
+        if not self._column_selection_start or not self._column_selection_end:
+            return
+        
+        painter = QPainter(self.viewport())
+        
+        # 获取选择背景色
+        if hasattr(self, '_current_theme'):
+            selection_color = QColor(self._current_theme.selection_bg)
+            selection_color.setAlpha(100)  # 半透明
+        else:
+            selection_color = QColor("#3d3d3d")
+            selection_color.setAlpha(100)
+        
+        # 获取起始和结束位置
+        start_block = self._column_selection_start.block().blockNumber()
+        end_block = self._column_selection_end.block().blockNumber()
+        start_column = self._column_selection_start.positionInBlock()
+        end_column = self._column_selection_end.positionInBlock()
+        
+        # 确保起始行号小于结束行号
+        if start_block > end_block:
+            start_block, end_block = end_block, start_block
+        
+        # 确保起始列号小于结束列号
+        if start_column > end_column:
+            start_column, end_column = end_column, start_column
+        
+        # 为每一行绘制矩形
+        for block_num in range(start_block, end_block + 1):
+            block = self.document().findBlockByNumber(block_num)
+            if not block.isValid():
+                continue
+            
+            # 获取该行的文本
+            block_text = block.text()
+            block_length = len(block_text)
+            
+            # 计算该行的列范围（考虑行长度）
+            line_start_col = min(start_column, block_length)
+            line_end_col = min(end_column, block_length)
+            
+            # 创建光标来获取位置
+            start_cursor = QTextCursor(block)
+            start_cursor.setPosition(block.position() + line_start_col)
+            end_cursor = QTextCursor(block)
+            end_cursor.setPosition(block.position() + line_end_col)
+            
+            # 获取屏幕坐标
+            start_rect = self.cursorRect(start_cursor)
+            end_rect = self.cursorRect(end_cursor)
+            
+            # 绘制矩形
+            if start_rect.isValid() and end_rect.isValid():
+                rect = QRect(
+                    start_rect.left(),
+                    start_rect.top(),
+                    end_rect.left() - start_rect.left(),
+                    start_rect.height()
+                )
+                painter.fillRect(rect, selection_color)
     
     def line_number_area_paint_event(self, event: QPaintEvent):
         """
@@ -635,7 +723,7 @@ class EditorPane(QPlainTextEdit):
             selection.format.setBackground(line_color)
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
-            selection.cursor.clearSelection()
+            selection.cursor.clearSelection()  # 只清除用于显示的副本，不影响实际光标
             extra_selections.append(selection)
         
         # 添加额外光标的显示
@@ -649,10 +737,12 @@ class EditorPane(QPlainTextEdit):
                 cursor_color = QColor("#3d3d3d")
             
             selection.format.setBackground(cursor_color)
-            selection.cursor = cursor
+            # 创建光标的副本用于显示，不修改原始光标
+            display_cursor = QTextCursor(cursor)
+            selection.cursor = display_cursor
             # 如果光标没有选择，选择当前字符以显示光标位置
-            if not selection.cursor.hasSelection():
-                selection.cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            if not display_cursor.hasSelection():
+                display_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
             extra_selections.append(selection)
         
         self.setExtraSelections(extra_selections)
@@ -664,6 +754,21 @@ class EditorPane(QPlainTextEdit):
         Args:
             event: 鼠标事件
         """
+        # 检查是否按下鼠标中键（列选择模式）
+        if event.button() == Qt.MouseButton.MiddleButton:
+            # 进入列选择模式
+            cursor = self.cursorForPosition(event.pos())
+            self._column_selection_mode = True
+            self._column_selection_start = QTextCursor(cursor)
+            self._column_selection_end = QTextCursor(cursor)
+            
+            # 清除现有的额外光标
+            self.clear_extra_cursors()
+            
+            # 接受事件
+            event.accept()
+            return
+        
         # 检查是否按下 Ctrl 键
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # 获取点击位置的光标
@@ -676,12 +781,66 @@ class EditorPane(QPlainTextEdit):
             # 接受事件
             event.accept()
         else:
-            # 清除额外光标
+            # 清除额外光标和列选择模式
             if self.extra_cursors:
                 self.clear_extra_cursors()
+            if self._column_selection_mode:
+                self._column_selection_mode = False
+                self._column_selection_start = None
+                self._column_selection_end = None
+                self.viewport().update()
             
             # 使用默认行为
             super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """
+        处理鼠标移动事件
+        
+        Args:
+            event: 鼠标事件
+        """
+        # 如果处于列选择模式，更新选择区域
+        if self._column_selection_mode:
+            cursor = self.cursorForPosition(event.pos())
+            self._column_selection_end = QTextCursor(cursor)
+            
+            # 触发重绘以显示选择区域
+            self.viewport().update()
+            
+            # 接受事件
+            event.accept()
+            return
+        
+        # 使用默认行为
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        """
+        处理鼠标释放事件
+        
+        Args:
+            event: 鼠标事件
+        """
+        # 如果是鼠标中键释放，完成列选择
+        if event.button() == Qt.MouseButton.MiddleButton and self._column_selection_mode:
+            # 从列选择区域创建多光标
+            self._create_cursors_from_column_selection()
+            
+            # 退出列选择模式
+            self._column_selection_mode = False
+            self._column_selection_start = None
+            self._column_selection_end = None
+            
+            # 更新显示
+            self.viewport().update()
+            
+            # 接受事件
+            event.accept()
+            return
+        
+        # 使用默认行为
+        super().mouseReleaseEvent(event)
     
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """
@@ -727,6 +886,16 @@ class EditorPane(QPlainTextEdit):
         
         # 处理 Escape 键
         if event.key() == Qt.Key.Key_Escape:
+            # 清除列选择模式
+            if self._column_selection_mode:
+                self._column_selection_mode = False
+                self._column_selection_start = None
+                self._column_selection_end = None
+                self.viewport().update()
+                event.accept()
+                return
+            
+            # 清除额外光标
             if self.extra_cursors:
                 self.clear_extra_cursors()
                 event.accept()
@@ -740,15 +909,15 @@ class EditorPane(QPlainTextEdit):
         
         # 如果有额外光标，同步操作
         if self.extra_cursors:
-            # 处理文本输入
-            if event.text() and not event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
-                self._multi_cursor_insert(event.text())
+            # 处理删除键 - 必须在文本输入之前检查！
+            if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+                self._multi_cursor_delete(event.key() == Qt.Key.Key_Backspace)
                 event.accept()
                 return
             
-            # 处理删除键
-            if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-                self._multi_cursor_delete(event.key() == Qt.Key.Key_Backspace)
+            # 处理文本输入
+            if event.text() and not event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+                self._multi_cursor_insert(event.text())
                 event.accept()
                 return
         
@@ -805,15 +974,32 @@ class EditorPane(QPlainTextEdit):
         # 按位置排序（从后往前，避免位置偏移）
         all_cursors.sort(key=lambda c: c.position(), reverse=True)
         
-        # 在所有光标位置删除文本
-        for cursor in all_cursors:
-            if backspace:
-                cursor.deletePreviousChar()
-            else:
-                cursor.deleteChar()
+        # 开始编辑事务（支持撤销）
+        main_cursor.beginEditBlock()
         
-        # 更新主光标
-        self.setTextCursor(main_cursor)
+        try:
+            # 从后往前删除，避免位置偏移
+            for cursor in all_cursors:
+                if cursor.hasSelection():
+                    # 如果有选择，删除选中的文本
+                    cursor.removeSelectedText()
+                else:
+                    # 如果没有选择，删除前一个或后一个字符
+                    if backspace:
+                        cursor.deletePreviousChar()
+                    else:
+                        cursor.deleteChar()
+        finally:
+            # 结束编辑事务
+            main_cursor.endEditBlock()
+        
+        # 更新主光标（使用第一个光标的位置）
+        all_cursors.sort(key=lambda c: c.position())
+        if all_cursors:
+            self.setTextCursor(all_cursors[0])
+        
+        # 清除额外光标
+        self.extra_cursors.clear()
         
         # 更新显示
         self._update_cursor_display()
@@ -863,3 +1049,70 @@ class EditorPane(QPlainTextEdit):
         """文本改变时的处理"""
         # 发射修改状态改变信号
         self.modification_changed.emit(self.is_modified())
+    
+    def trigger_content_detection(self) -> None:
+        """
+        触发基于内容的语言检测
+        当用户粘贴内容到新文档时调用
+        """
+        if not self._file_path:  # 只在无文件路径时检测
+            content = self.toPlainText()
+            if content.strip():
+                language = LanguageDetector.detect_language_from_content(content)
+                if language:
+                    self.set_language(language)
+    
+    def _create_cursors_from_column_selection(self) -> None:
+        """从列选择区域创建多光标"""
+        if not self._column_selection_start or not self._column_selection_end:
+            return
+        
+        # 获取起始和结束位置
+        start_block = self._column_selection_start.block().blockNumber()
+        end_block = self._column_selection_end.block().blockNumber()
+        start_column = self._column_selection_start.positionInBlock()
+        end_column = self._column_selection_end.positionInBlock()
+        
+        # 确保起始行号小于结束行号
+        if start_block > end_block:
+            start_block, end_block = end_block, start_block
+        
+        # 如果只有一行，不创建列选择
+        if start_block == end_block:
+            return
+        
+        # 清除现有的额外光标
+        self.extra_cursors.clear()
+        
+        # 为每一行创建光标
+        # 注意：对于竖向拖动（start_column == end_column），我们不设置选择，只设置光标位置
+        for block_num in range(start_block, end_block + 1):
+            block = self.document().findBlockByNumber(block_num)
+            if not block.isValid():
+                continue
+            
+            # 获取该行的文本
+            block_text = block.text()
+            block_length = len(block_text)
+            
+            # 计算该行的列位置（考虑行长度）
+            # 对于竖向拖动，使用较小的列号
+            column = min(min(start_column, end_column), block_length)
+            
+            # 创建光标并设置位置
+            cursor = QTextCursor(block)
+            cursor.setPosition(block.position() + column)
+            
+            # 如果是矩形选择（start_column != end_column），设置选择范围
+            if start_column != end_column:
+                line_end_col = min(max(start_column, end_column), block_length)
+                cursor.setPosition(block.position() + line_end_col, QTextCursor.MoveMode.KeepAnchor)
+            
+            # 第一行作为主光标，其他行作为额外光标
+            if block_num == start_block:
+                self.setTextCursor(cursor)
+            else:
+                self.extra_cursors.append(cursor)
+        
+        # 更新显示
+        self._update_cursor_display()

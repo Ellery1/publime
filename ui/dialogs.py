@@ -7,9 +7,10 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QTextEdit, QFileDialog, QListWidget,
-    QListWidgetItem, QGroupBox, QMessageBox, QButtonGroup, QRadioButton
+    QListWidgetItem, QGroupBox, QMessageBox, QButtonGroup, QRadioButton,
+    QApplication
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
 from core.search_engine import SearchEngine, Match
 from typing import Optional, List
@@ -35,6 +36,9 @@ class FindDialog(QDialog):
         self.setup_ui()
         self.setWindowTitle("查找和替换")
         self.resize(500, 200)
+        
+        # 恢复上次的匹配模式
+        self._restore_match_mode()
     
     def setup_ui(self):
         """设置UI"""
@@ -74,12 +78,12 @@ class FindDialog(QDialog):
         self.match_mode_group = QButtonGroup(self)
         
         self.fuzzy_match_rb = QRadioButton("模糊匹配")
-        self.fuzzy_match_rb.setChecked(True)  # 默认模糊匹配
         self.fuzzy_match_rb.toggled.connect(self.on_match_mode_changed)
         self.match_mode_group.addButton(self.fuzzy_match_rb)
         options_layout2.addWidget(self.fuzzy_match_rb)
         
         self.exact_match_rb = QRadioButton("精确匹配")
+        self.exact_match_rb.setChecked(True)  # 默认精确匹配
         self.exact_match_rb.toggled.connect(self.on_match_mode_changed)
         self.match_mode_group.addButton(self.exact_match_rb)
         options_layout2.addWidget(self.exact_match_rb)
@@ -205,32 +209,57 @@ class FindDialog(QDialog):
         # 清除之前的高亮
         self.clear_highlights()
         
-        # 创建高亮格式
-        highlight_format = QTextCharFormat()
-        highlight_format.setBackground(QColor(255, 255, 0, 100))  # 黄色半透明
+        if not self.matches:
+            return
+        
+        # 创建两种高亮格式
+        # 1. 普通匹配项 - 浅黄色半透明
+        normal_format = QTextCharFormat()
+        normal_format.setBackground(QColor(255, 255, 0, 80))  # 浅黄色，更透明
+        
+        # 2. 当前匹配项 - 橙色，更鲜艳
+        current_format = QTextCharFormat()
+        current_format.setBackground(QColor(255, 165, 0, 180))  # 橙色，不透明度更高
         
         # 高亮每个匹配项
         cursor = self.current_editor.textCursor()
-        for match in self.matches:
+        for i, match in enumerate(self.matches):
             cursor.setPosition(match.start_pos)
             cursor.setPosition(match.end_pos, QTextCursor.KeepAnchor)
-            cursor.mergeCharFormat(highlight_format)
+            
+            # 当前匹配项使用不同的颜色
+            if i == self.current_match_index:
+                cursor.mergeCharFormat(current_format)
+            else:
+                cursor.mergeCharFormat(normal_format)
     
     def clear_highlights(self):
         """清除高亮"""
         if not self.current_editor:
             return
         
+        # 保存当前光标位置
+        current_cursor = self.current_editor.textCursor()
+        current_position = current_cursor.position()
+        
+        # 创建一个新的光标来清除所有额外格式
         cursor = self.current_editor.textCursor()
         cursor.select(QTextCursor.Document)
         
-        # 重置格式
-        format = QTextCharFormat()
-        cursor.setCharFormat(format)
+        # 创建一个空的格式来清除额外格式
+        empty_format = QTextCharFormat()
+        cursor.setCharFormat(empty_format)
         
         # 恢复光标位置
+        cursor.setPosition(current_position)
         cursor.clearSelection()
         self.current_editor.setTextCursor(cursor)
+        
+        # 获取语法高亮器并触发重新高亮
+        highlighter = self.current_editor.syntax_highlighter
+        if highlighter:
+            # 触发重新高亮整个文档
+            highlighter.rehighlight()
     
     def jump_to_match(self, index: int):
         """跳转到指定匹配项"""
@@ -238,6 +267,12 @@ class FindDialog(QDialog):
             return
         
         if 0 <= index < len(self.matches):
+            self.current_match_index = index
+            
+            # 重新高亮所有匹配项（以更新当前匹配项的颜色）
+            self.highlight_all_matches()
+            
+            # 跳转到匹配项
             match = self.matches[index]
             cursor = self.current_editor.textCursor()
             cursor.setPosition(match.start_pos)
@@ -245,7 +280,7 @@ class FindDialog(QDialog):
             self.current_editor.setTextCursor(cursor)
             self.current_editor.ensureCursorVisible()
             
-            self.current_match_index = index
+            # 更新计数标签
             self.match_count_label.setText(
                 f"匹配: {index + 1}/{len(self.matches)}"
             )
@@ -298,29 +333,51 @@ class FindDialog(QDialog):
         if not pattern:
             return
         
-        # 获取编辑器文本
+        # 执行搜索获取所有匹配项
         text = self.current_editor.toPlainText()
         
-        # 执行替换
         try:
-            new_text, count = self.search_engine.replace_in_text(
-                text,
-                pattern,
-                replacement,
-                case_sensitive=self.case_sensitive_cb.isChecked(),
-                regex=self.regex_cb.isChecked(),
-                replace_all=True
-            )
+            # 判断是否精确匹配
+            is_exact_match = self.exact_match_rb.isChecked()
             
-            # 更新编辑器文本
-            self.current_editor.setPlainText(new_text)
+            if is_exact_match:
+                import re
+                escaped_pattern = re.escape(pattern)
+                regex_pattern = r'\b' + escaped_pattern + r'\b'
+                matches = self.search_engine.find_in_text(
+                    text,
+                    regex_pattern,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    regex=True
+                )
+            else:
+                matches = self.search_engine.find_in_text(
+                    text,
+                    pattern,
+                    case_sensitive=self.case_sensitive_cb.isChecked(),
+                    regex=self.regex_cb.isChecked()
+                )
+            
+            if not matches:
+                QMessageBox.information(self, "替换完成", "未找到匹配项")
+                return
+            
+            # 使用编辑块将所有替换操作组合为单个撤销单元
+            cursor = self.current_editor.textCursor()
+            cursor.beginEditBlock()
+            
+            try:
+                # 从后往前替换，避免位置偏移
+                for match in reversed(matches):
+                    cursor.setPosition(match.start_pos)
+                    cursor.setPosition(match.end_pos, QTextCursor.KeepAnchor)
+                    cursor.insertText(replacement)
+            finally:
+                cursor.endEditBlock()
             
             # 显示替换结果
-            QMessageBox.information(
-                self,
-                "替换完成",
-                f"已替换 {count} 处"
-            )
+            count = len(matches)
+            QMessageBox.information(self, "替换完成", f"已替换 {count} 处")
             
             # 更新搜索
             self.update_search()
@@ -333,6 +390,29 @@ class FindDialog(QDialog):
         super().showEvent(event)
         self.find_input.setFocus()
         self.find_input.selectAll()
+    
+    def _restore_match_mode(self):
+        """恢复上次的匹配模式"""
+        settings = QSettings("Publime", "FindDialog")
+        
+        # 读取上次的模式，默认为精确匹配
+        is_exact = settings.value("exact_match", True, type=bool)
+        
+        if is_exact:
+            self.exact_match_rb.setChecked(True)
+        else:
+            self.fuzzy_match_rb.setChecked(True)
+    
+    def _save_match_mode(self):
+        """保存当前的匹配模式"""
+        settings = QSettings("Publime", "FindDialog")
+        settings.setValue("exact_match", self.exact_match_rb.isChecked())
+    
+    def closeEvent(self, event):
+        """对话框关闭时保存状态并清除高亮"""
+        self._save_match_mode()
+        self.clear_highlights()  # 清除查找高亮
+        super().closeEvent(event)
 
 
 class FindInFilesDialog(QDialog):

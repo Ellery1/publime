@@ -80,9 +80,10 @@ class LanguageRules:
         """获取 Python 语法规则"""
         rules = []
         
+        # 注释规则（必须在字符串规则之前）
         rules.append(HighlightRule(r'#[^\n]*', 'comment'))
-        rules.append(HighlightRule(r'"""[\s\S]*?"""', 'comment'))
-        rules.append(HighlightRule(r"'''[\s\S]*?'''", 'comment'))
+        
+        # 字符串规则（单行）
         rules.append(HighlightRule(r'[fF]"[^"\\]*(\\.[^"\\]*)*"', 'string'))
         rules.append(HighlightRule(r"[fF]'[^'\\]*(\\.[^'\\]*)*'", 'string'))
         rules.append(HighlightRule(r'"[^"\\]*(\\.[^"\\]*)*"', 'string'))
@@ -142,8 +143,11 @@ class LanguageRules:
         """获取 Java 语法规则"""
         rules = []
         
+        # 注释规则（必须在字符串规则之前）
         rules.append(HighlightRule(r'//[^\n]*', 'comment'))
-        rules.append(HighlightRule(r'/\*.*?\*/', 'comment'))
+        rules.append(HighlightRule(r'/\*[\s\S]*?\*/', 'comment'))
+        
+        # 字符串规则
         rules.append(HighlightRule(r'"[^"\\]*(\\.[^"\\]*)*"', 'string'))
         rules.append(HighlightRule(r"'[^'\\]*(\\.[^'\\]*)*'", 'string'))
         rules.append(HighlightRule(r'@[\w\.]+', 'decorator'))
@@ -187,10 +191,15 @@ class LanguageRules:
         """获取 SQL 语法规则"""
         rules = []
         
+        # 单行注释
         rules.append(HighlightRule(r'--[^\n]*', 'comment'))
-        rules.append(HighlightRule(r'/\*.*?\*/', 'comment'))
+        # 多行注释由状态机处理，不再使用正则规则
+        
+        # 字符串
         rules.append(HighlightRule(r"'[^']*'", 'string'))
         rules.append(HighlightRule(r'"[^"]*"', 'string'))
+        
+        # 数字
         rules.append(HighlightRule(r'\b[0-9]+\.?[0-9]*\b', 'number'))
         
         dml_keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE',
@@ -268,8 +277,11 @@ class LanguageRules:
         """获取 JavaScript 语法规则"""
         rules = []
         
+        # 注释规则（必须在字符串规则之前）
         rules.append(HighlightRule(r'//[^\n]*', 'comment'))
-        rules.append(HighlightRule(r'/\*.*?\*/', 'comment'))
+        rules.append(HighlightRule(r'/\*[\s\S]*?\*/', 'comment'))
+        
+        # 字符串规则
         rules.append(HighlightRule(r'`[^`]*`', 'string'))
         rules.append(HighlightRule(r'"[^"\\]*(\\.[^"\\]*)*"', 'string'))
         rules.append(HighlightRule(r"'[^'\\]*(\\.[^'\\]*)*'", 'string'))
@@ -348,6 +360,10 @@ class LanguageRules:
         """获取 Markdown 语法规则（包含所有改进）"""
         rules = []
         
+        # HTML 标签（必须在其他规则之前）
+        # 改进：支持多行HTML标签和自闭合标签
+        rules.append(HighlightRule(r'</?[a-zA-Z][^>]*/?>', 'tag'))
+        
         # 标题 (橙红色，更醒目)
         rules.append(HighlightRule(r'^#{1,6}\s+.*$', 'heading'))
         
@@ -379,13 +395,6 @@ class LanguageRules:
         
         # 表格分隔符 (特殊颜色)
         rules.append(HighlightRule(r'\|', 'operator'))
-        
-        # HTML 标签
-        rules.append(HighlightRule(r'</?[a-zA-Z][^>]*>', 'tag'))
-        
-        # 注意：行内数学公式 $...$ 和块级数学公式 $$...$$ 
-        # 现在通过 _highlight_inline_math() 和 _highlight_markdown_with_code_blocks() 手动处理
-        # 以便对公式内部应用语法高亮
         
         # 列表
         rules.append(HighlightRule(r'^\s*[-\*\+]\s+', 'operator'))
@@ -661,21 +670,198 @@ class SyntaxHighlighter(QSyntaxHighlighter):
     def highlightBlock(self, text: str):
         """
         高亮文本块
+
+        Args:
+            text: 要高亮的文本
+        """
+        if not self.rules:
+            return
+
+        # 根据语言选择高亮方法
+        if self.language:
+            lang = self.language.lower()
+            if lang == 'python':
+                self._highlight_python_multiline(text)
+            elif lang == 'java':
+                self._highlight_java_multiline(text)
+            elif lang == 'javascript' or lang == 'js':
+                self._highlight_javascript_multiline(text)
+            elif lang == 'sql':
+                self._highlight_sql_multiline(text)
+            elif lang == 'markdown':
+                self._highlight_markdown_with_code_blocks(text)
+            else:
+                self._highlight_standard(text)
+        else:
+            self._highlight_standard(text)
+
+    
+    def _highlight_java_multiline(self, text: str):
+        """
+        Java 多行注释高亮
         
         Args:
             text: 要高亮的文本
         """
-        if not self.language:
-            return
+        # 状态码:
+        # 0 = 正常
+        # 1 = 在 /* 注释中
         
-        # 根据语言选择不同的高亮方法
-        if self.language.lower() == 'python':
-            self._highlight_python_multiline(text)
-        elif self.language.lower() == 'markdown':
-            self._highlight_markdown_with_code_blocks(text)
+        prev_state = self.previousBlockState()
+        
+        # 如果前一个块在多行注释中
+        if prev_state == 1:
+            # 查找注释结束位置
+            end_index = text.find('*/')
+            
+            if end_index == -1:
+                # 注释继续到下一行
+                self.setFormat(0, len(text), self.formats['comment'])
+                self.setCurrentBlockState(1)
+            else:
+                # 注释在本行结束
+                self.setFormat(0, end_index + 2, self.formats['comment'])
+                self.setCurrentBlockState(0)
+                # 继续处理本行剩余部分
+                remaining_text = text[end_index + 2:]
+                if remaining_text.strip():
+                    self._highlight_standard_at_offset(remaining_text, end_index + 2)
+                    # 重新应用字符串格式
+                    self._highlight_java_strings_at_offset(remaining_text, end_index + 2)
         else:
+            # 正常状态，先应用标准规则
             self._highlight_standard(text)
-    
+            
+            # 重新应用字符串格式，确保字符串不被变量规则覆盖
+            self._highlight_java_strings(text)
+            
+            # 查找多行注释的开始
+            start_index = text.find('/*')
+            
+            if start_index != -1:
+                # 查找注释结束位置
+                end_index = text.find('*/', start_index + 2)
+                
+                if end_index == -1:
+                    # 注释跨行
+                    self.setFormat(start_index, len(text) - start_index, self.formats['comment'])
+                    self.setCurrentBlockState(1)
+                else:
+                    # 注释在同一行结束
+                    self.setFormat(start_index, end_index - start_index + 2, self.formats['comment'])
+                    self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(0)
+
+    def _highlight_javascript_multiline(self, text: str):
+        """
+        JavaScript 多行注释高亮
+        
+        Args:
+            text: 要高亮的文本
+        """
+        # 状态码:
+        # 0 = 正常
+        # 1 = 在 /* 注释中
+        
+        prev_state = self.previousBlockState()
+        
+        # 如果前一个块在多行注释中
+        if prev_state == 1:
+            # 查找注释结束位置
+            end_index = text.find('*/')
+            
+            if end_index == -1:
+                # 注释继续到下一行
+                self.setFormat(0, len(text), self.formats['comment'])
+                self.setCurrentBlockState(1)
+            else:
+                # 注释在本行结束
+                self.setFormat(0, end_index + 2, self.formats['comment'])
+                self.setCurrentBlockState(0)
+                # 继续处理本行剩余部分
+                remaining_text = text[end_index + 2:]
+                if remaining_text.strip():
+                    self._highlight_standard_at_offset(remaining_text, end_index + 2)
+                    # 重新应用字符串格式
+                    self._highlight_javascript_strings_at_offset(remaining_text, end_index + 2)
+        else:
+            # 正常状态，先应用标准规则
+            self._highlight_standard(text)
+            
+            # 重新应用字符串格式，确保字符串不被变量规则覆盖
+            self._highlight_javascript_strings(text)
+            
+            # 查找多行注释的开始
+            start_index = text.find('/*')
+            
+            if start_index != -1:
+                # 查找注释结束位置
+                end_index = text.find('*/', start_index + 2)
+                
+                if end_index == -1:
+                    # 注释跨行
+                    self.setFormat(start_index, len(text) - start_index, self.formats['comment'])
+                    self.setCurrentBlockState(1)
+                else:
+                    # 注释在同一行结束
+                    self.setFormat(start_index, end_index - start_index + 2, self.formats['comment'])
+                    self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(0)
+    def _highlight_sql_multiline(self, text: str):
+        """
+        SQL 多行注释高亮
+
+        Args:
+            text: 要高亮的文本
+        """
+        # 状态码:
+        # 0 = 正常
+        # 1 = 在 /* 注释中
+
+        prev_state = self.previousBlockState()
+
+        # 如果前一个块在多行注释中
+        if prev_state == 1:
+            # 查找注释结束位置
+            end_index = text.find('*/')
+
+            if end_index == -1:
+                # 注释继续到下一行
+                self.setFormat(0, len(text), self.formats['comment'])
+                self.setCurrentBlockState(1)
+            else:
+                # 注释在本行结束
+                self.setFormat(0, end_index + 2, self.formats['comment'])
+                self.setCurrentBlockState(0)
+                # 继续处理本行剩余部分
+                remaining_text = text[end_index + 2:]
+                if remaining_text.strip():
+                    self._highlight_standard_at_offset(remaining_text, end_index + 2)
+        else:
+            # 正常状态，先应用标准规则
+            self._highlight_standard(text)
+
+            # 查找多行注释的开始
+            start_index = text.find('/*')
+
+            if start_index != -1:
+                # 查找注释结束位置
+                end_index = text.find('*/', start_index + 2)
+
+                if end_index == -1:
+                    # 注释跨行
+                    self.setFormat(start_index, len(text) - start_index, self.formats['comment'])
+                    self.setCurrentBlockState(1)
+                else:
+                    # 注释在同一行结束
+                    self.setFormat(start_index, end_index - start_index + 2, self.formats['comment'])
+                    self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(0)
+
+
     def _highlight_standard(self, text: str):
         """
         标准高亮方法
@@ -705,51 +891,108 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         Args:
             text: 要高亮的文本
         """
-        # 首先应用标准规则
-        self._highlight_standard(text)
+        # 状态码:
+        # 0 = 正常
+        # 1 = 在 """ 字符串中
+        # 2 = 在 ''' 字符串中
         
-        # 处理多行字符串
-        self.setCurrentBlockState(0)
+        # 首先处理多行字符串
+        prev_state = self.previousBlockState()
         
-        # 三引号字符串状态: 1="""  2='''
-        start_index = 0
-        if self.previousBlockState() != 1 and self.previousBlockState() != 2:
-            # 查找多行字符串的开始
-            triple_double = text.find('"""')
-            triple_single = text.find("'''")
-            
-            if triple_double != -1 and (triple_single == -1 or triple_double < triple_single):
-                start_index = triple_double
-                self.setCurrentBlockState(1)
-            elif triple_single != -1:
-                start_index = triple_single
-                self.setCurrentBlockState(2)
-        else:
-            self.setCurrentBlockState(self.previousBlockState())
-            start_index = 0
-        
-        # 应用多行字符串格式
-        while self.currentBlockState() in [1, 2]:
-            if self.currentBlockState() == 1:
-                end_index = text.find('"""', start_index + 3 if start_index == 0 else start_index)
-                delimiter_length = 3
-            else:
-                end_index = text.find("'''", start_index + 3 if start_index == 0 else start_index)
-                delimiter_length = 3
+        # 如果前一个块在多行字符串中
+        if prev_state in [1, 2]:
+            # 继续处理多行字符串
+            delimiter = '"""' if prev_state == 1 else "'''"
+            end_index = text.find(delimiter)
             
             if end_index == -1:
-                # 多行字符串继续到下一行
-                self.setFormat(start_index, len(text) - start_index, self.formats['comment'])
-                break
+                # 字符串继续到下一行
+                self.setFormat(0, len(text), self.formats['comment'])
+                self.setCurrentBlockState(prev_state)
             else:
-                # 多行字符串在本行结束
-                length = end_index - start_index + delimiter_length
-                self.setFormat(start_index, length, self.formats['comment'])
+                # 字符串在本行结束
+                self.setFormat(0, end_index + 3, self.formats['comment'])
                 self.setCurrentBlockState(0)
-                break
+                # 继续处理本行剩余部分
+                remaining_text = text[end_index + 3:]
+                if remaining_text.strip():
+                    # 为剩余文本创建临时高亮
+                    self._highlight_standard_at_offset(remaining_text, end_index + 3)
+                    # 重新应用单行字符串格式（确保字符串是黄色）
+                    self._highlight_python_strings_at_offset(remaining_text, end_index + 3)
+        else:
+            # 正常状态，先应用标准规则
+            self._highlight_standard(text)
+            
+            # 重新应用单行字符串格式，确保字符串是黄色而不是白色
+            self._highlight_python_strings(text)
+            
+            # 然后查找多行字符串的开始
+            # 查找 """ 和 ''' 的位置
+            triple_double_index = text.find('"""')
+            triple_single_index = text.find("'''")
+            
+            # 确定哪个先出现
+            start_index = -1
+            delimiter = None
+            state = 0
+            
+            if triple_double_index != -1 and triple_single_index != -1:
+                if triple_double_index < triple_single_index:
+                    start_index = triple_double_index
+                    delimiter = '"""'
+                    state = 1
+                else:
+                    start_index = triple_single_index
+                    delimiter = "'''"
+                    state = 2
+            elif triple_double_index != -1:
+                start_index = triple_double_index
+                delimiter = '"""'
+                state = 1
+            elif triple_single_index != -1:
+                start_index = triple_single_index
+                delimiter = "'''"
+                state = 2
+            
+            # 如果找到了多行字符串的开始
+            if start_index != -1:
+                # 查找结束位置
+                end_index = text.find(delimiter, start_index + 3)
+                
+                if end_index == -1:
+                    # 字符串跨行
+                    self.setFormat(start_index, len(text) - start_index, self.formats['comment'])
+                    self.setCurrentBlockState(state)
+                else:
+                    # 字符串在同一行结束
+                    self.setFormat(start_index, end_index - start_index + 3, self.formats['comment'])
+                    self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(0)
         
         # 处理 f-string 中的表达式
-        self._highlight_fstring_expressions(text)
+        if prev_state == 0:
+            self._highlight_fstring_expressions(text)
+    
+    def _highlight_standard_at_offset(self, text: str, offset: int):
+        """
+        在指定偏移位置应用标准高亮规则
+        
+        Args:
+            text: 要高亮的文本
+            offset: 文本在原始行中的偏移位置
+        """
+        for rule in self.rules:
+            iterator = rule.pattern.globalMatch(text)
+            while iterator.hasNext():
+                match = iterator.next()
+                start = match.capturedStart() + offset
+                length = match.capturedLength()
+                format_type = rule.format_type
+                
+                if format_type in self.formats:
+                    self.setFormat(start, length, self.formats[format_type])
     
     def _highlight_fstring_expressions(self, text: str):
         """
@@ -772,6 +1015,127 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 
                 # 对表达式内容应用变量格式
                 self.setFormat(expr_start + 1, expr_length - 2, self.formats['variable'])
+    
+    def _highlight_python_strings(self, text: str):
+        """
+        重新应用Python字符串格式，确保字符串是黄色
+        
+        Args:
+            text: 要高亮的文本
+        """
+        # 单行字符串规则（与 _get_python_rules 中的顺序一致）
+        string_patterns = [
+            r'[fF]"[^"\\]*(\\.[^"\\]*)*"',
+            r"[fF]'[^'\\]*(\\.[^'\\]*)*'",
+            r'"[^"\\]*(\\.[^"\\]*)*"',  # 修复：添加了缺失的 *
+            r"'[^'\\]*(\\.[^'\\]*)*'",
+            r'[rRbB]"[^"\\]*(\\.[^"\\]*)*"',
+            r"[rRbB]'[^'\\]*(\\.[^'\\]*)*'"
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats['string'])
+    
+    def _highlight_python_strings_at_offset(self, text: str, offset: int):
+        """
+        在指定偏移位置重新应用Python字符串格式
+        
+        Args:
+            text: 要高亮的文本
+            offset: 文本在原始行中的偏移位置
+        """
+        # 单行字符串规则
+        string_patterns = [
+            r'[fF]"[^"\\]*(\\.[^"\\]*)*"',
+            r"[fF]'[^'\\]*(\\.[^'\\]*)*'",
+            r'"[^"\\]*(\\.[^"\\]*)*"',
+            r"'[^'\\]*(\\.[^'\\]*)*'",
+            r'[rRbB]"[^"\\]*(\\.[^"\\]*)*"',
+            r"[rRbB]'[^'\\]*(\\.[^'\\]*)*'"
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(offset + match.start(), match.end() - match.start(), self.formats['string'])
+    
+    def _highlight_java_strings(self, text: str):
+        """
+        重新应用Java字符串格式，确保字符串是黄色
+        
+        Args:
+            text: 要高亮的文本
+        """
+        # Java 字符串规则
+        string_patterns = [
+            r'"[^"\\]*(\\.[^"\\]*)*"',  # 双引号字符串
+            r"'[^'\\]*(\\.[^'\\]*)*'"   # 单引号字符（字符字面量）
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats['string'])
+    
+    def _highlight_java_strings_at_offset(self, text: str, offset: int):
+        """
+        在指定偏移位置重新应用Java字符串格式
+        
+        Args:
+            text: 要高亮的文本
+            offset: 文本在原始行中的偏移位置
+        """
+        # Java 字符串规则
+        string_patterns = [
+            r'"[^"\\]*(\\.[^"\\]*)*"',
+            r"'[^'\\]*(\\.[^'\\]*)*'"
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(offset + match.start(), match.end() - match.start(), self.formats['string'])
+    
+    def _highlight_javascript_strings(self, text: str):
+        """
+        重新应用JavaScript字符串格式，确保字符串是黄色
+        
+        Args:
+            text: 要高亮的文本
+        """
+        # JavaScript 字符串规则
+        string_patterns = [
+            r'`[^`]*`',                     # 模板字符串
+            r'"[^"\\]*(\\.[^"\\]*)*"',      # 双引号字符串
+            r"'[^'\\]*(\\.[^'\\]*)*'"       # 单引号字符串
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats['string'])
+    
+    def _highlight_javascript_strings_at_offset(self, text: str, offset: int):
+        """
+        在指定偏移位置重新应用JavaScript字符串格式
+        
+        Args:
+            text: 要高亮的文本
+            offset: 文本在原始行中的偏移位置
+        """
+        # JavaScript 字符串规则
+        string_patterns = [
+            r'`[^`]*`',
+            r'"[^"\\]*(\\.[^"\\]*)*"',
+            r"'[^'\\]*(\\.[^'\\]*)*'"
+        ]
+        
+        for pattern in string_patterns:
+            regex = re.compile(pattern)
+            for match in regex.finditer(text):
+                self.setFormat(offset + match.start(), match.end() - match.start(), self.formats['string'])
     
     def _highlight_markdown_with_code_blocks(self, text: str):
         """

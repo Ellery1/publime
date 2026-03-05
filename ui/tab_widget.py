@@ -6,8 +6,8 @@
 
 import os
 from typing import Optional
-from PySide6.QtWidgets import QTabWidget, QTabBar
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QTabWidget, QTabBar, QLineEdit, QMenu
+from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QIcon, QMouseEvent
 
 from ui.editor_pane import EditorPane
@@ -74,6 +74,13 @@ class TabWidget(QTabWidget):
                     if index >= 0:
                         # 点击在标签上，发射Qt内置的tabCloseRequested信号
                         self.tabCloseRequested.emit(index)
+                        return True
+                elif event.button() == Qt.MouseButton.RightButton:
+                    # 右键点击
+                    index = self.tabBar().tabAt(event.pos())
+                    if index >= 0:
+                        # 点击在标签上，显示右键菜单
+                        self._show_context_menu(event.pos(), index)
                         return True
         
         return super().eventFilter(obj, event)
@@ -298,3 +305,108 @@ class TabWidget(QTabWidget):
                 if modified:
                     title = f"{title} *"
                 self.setTabText(index, title)
+    
+    def _show_context_menu(self, pos: QPoint, index: int):
+        """
+        显示右键菜单
+        
+        Args:
+            pos: 鼠标位置
+            index: 标签页索引
+        """
+        # 创建右键菜单
+        menu = QMenu(self)
+        
+        # 添加"修改文件名"选项
+        rename_action = menu.addAction("修改文件名")
+        rename_action.triggered.connect(lambda: self._rename_tab(index))
+        
+        # 显示菜单
+        menu.exec(self.tabBar().mapToGlobal(pos))
+    
+    def _rename_tab(self, index: int):
+        """
+        修改标签页文件名
+        
+        Args:
+            index: 标签页索引
+        """
+        if index < 0 or index >= self.count():
+            return
+        
+        # 获取编辑器
+        editor = self.get_editor_at(index)
+        if not editor:
+            return
+        
+        # 获取当前文件路径
+        file_path = editor.get_file_path()
+        
+        # 如果是未命名文件，直接修改标签页标题
+        if not file_path:
+            # 创建行编辑框
+            line_edit = QLineEdit(self)
+            line_edit.setText(self.tabText(index).rstrip(" *"))
+            
+            # 获取标签页的矩形区域
+            tab_rect = self.tabBar().tabRect(index)
+            line_edit.setGeometry(tab_rect)
+            line_edit.show()
+            line_edit.setFocus()
+            line_edit.selectAll()
+            
+            # 定义保存函数
+            def save_name():
+                new_name = line_edit.text().strip()
+                if new_name:
+                    self.setTabText(index, new_name)
+                line_edit.deleteLater()
+            
+            # 连接信号
+            line_edit.editingFinished.connect(save_name)
+            line_edit.returnPressed.connect(save_name)
+            
+            # 失去焦点时保存
+            def focus_lost():
+                if not line_edit.hasFocus():
+                    save_name()
+            
+            line_edit.focusOutEvent = focus_lost
+        else:
+            # 如果是已保存的文件，弹出文件保存对话框
+            from PySide6.QtWidgets import QFileDialog
+            
+            # 获取当前文件名
+            current_name = os.path.basename(file_path)
+            current_dir = os.path.dirname(file_path)
+            
+            # 弹出文件保存对话框
+            new_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "修改文件名",
+                os.path.join(current_dir, current_name),
+                "所有文件 (*.*)"
+            )
+            
+            # 如果用户选择了新路径
+            if new_path and new_path != file_path:
+                # 保存文件到新路径
+                try:
+                    with open(new_path, 'w', encoding='utf-8') as f:
+                        f.write(editor.toPlainText())
+                    
+                    # 更新编辑器的文件路径
+                    editor.set_file_path(new_path)
+                    
+                    # 更新标签页标题
+                    self.setTabText(index, os.path.basename(new_path))
+                    
+                    # 重置修改状态
+                    editor.document().setModified(False)
+                except Exception as e:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.warning(
+                        self,
+                        "错误",
+                        f"无法修改文件名：{str(e)}"
+                    )

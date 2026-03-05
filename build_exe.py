@@ -29,11 +29,6 @@ args = [
     '--noconfirm',                      # 不询问确认
     # 添加数据文件（Windows 使用分号）
     f'--add-data={icon_path};ui',       # 包含图标文件
-    # 隐藏导入
-    '--hidden-import=PySide6.QtCore',
-    '--hidden-import=PySide6.QtGui',
-    '--hidden-import=PySide6.QtWidgets',
-    '--hidden-import=PySide6.QtNetwork',  # 添加网络模块
 ]
 
 print(f"PyInstaller 参数: {' '.join(args)}")

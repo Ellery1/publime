@@ -22,6 +22,8 @@ import json
 import tempfile
 from datetime import datetime
 
+# 版本号
+VERSION = "v1.0"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -80,8 +82,9 @@ class MainWindow(QMainWindow):
         # 检查崩溃恢复（优先级最高）
         recovered = self.check_crash_recovery()
         
-        # 如果没有崩溃恢复，且没有命令行文件，尝试恢复上次会话
-        if not recovered and not has_command_line_files:
+        # 如果没有崩溃恢复，尝试恢复上次会话
+        # 注意：即使有命令行文件，也恢复上次会话（作为额外的tab）
+        if not recovered:
             self.restore_session()
         
         # 只有在以下情况才创建新文件：
@@ -210,17 +213,21 @@ class MainWindow(QMainWindow):
         # 编辑菜单
         edit_menu = menubar.addMenu("编辑(&E)")
         
-        # 创建快捷键但不添加到菜单（保留功能和快捷键）
-        undo_action = QAction(self)
+        # 撤回
+        undo_action = QAction("撤回(&U)", self)
         undo_action.setShortcut(QKeySequence.Undo)
         undo_action.triggered.connect(self.undo)
-        self.addAction(undo_action)
+        edit_menu.addAction(undo_action)
         
-        redo_action = QAction(self)
+        # 重做
+        redo_action = QAction("重做(&R)", self)
         redo_action.setShortcut(QKeySequence.Redo)
         redo_action.triggered.connect(self.redo)
-        self.addAction(redo_action)
+        edit_menu.addAction(redo_action)
         
+        edit_menu.addSeparator()
+        
+        # 剪切、复制、粘贴（保留快捷键但不显示在菜单）
         cut_action = QAction(self)
         cut_action.setShortcut(QKeySequence.Cut)
         cut_action.triggered.connect(self.cut)
@@ -711,8 +718,16 @@ class MainWindow(QMainWindow):
             parsed = json.loads(text)
             formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
             
-            # 设置格式化后的文本
-            editor.setPlainText(formatted)
+            # 使用支持撤销的方式设置文本
+            cursor = editor.textCursor()
+            cursor.beginEditBlock()
+            try:
+                # 选择全部文本
+                cursor.select(cursor.SelectionType.Document)
+                # 替换为格式化后的文本
+                cursor.insertText(formatted)
+            finally:
+                cursor.endEditBlock()
             
             self.statusBar().showMessage("JSON 格式化成功", 2000)
         
@@ -745,10 +760,50 @@ class MainWindow(QMainWindow):
             # 格式化
             formatted_text = format_sql_text(text)
             
-            # 设置格式化后的文本
-            editor.setPlainText(formatted_text)
+            # 检查内容是否发生变化（忽略空白字符和关键字大小写）
+            def normalize_content(content):
+                """移除所有空白字符并标准化关键字大小写，用于比较实际内容是否相同"""
+                import re
+                
+                # SQL关键字列表
+                keywords = [
+                    'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+                    'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'ON', 'GROUP', 'BY', 'ORDER',
+                    'HAVING', 'UNION', 'AS', 'IS', 'NULL', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE',
+                    'DISTINCT', 'ALL', 'ANY', 'LIMIT', 'OFFSET', 'ASC', 'DESC', 'INTO', 'VALUES',
+                    'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'TABLE', 'INDEX', 'VIEW'
+                ]
+                
+                # 先标准化关键字大小写（在移除空白字符之前）
+                normalized = content
+                for keyword in keywords:
+                    pattern = re.compile(r'\b' + keyword + r'\b', re.IGNORECASE)
+                    normalized = pattern.sub(keyword.upper(), normalized)
+                
+                # 然后移除所有空白字符
+                normalized = re.sub(r'\s+', '', normalized)
+                return normalized
             
-            self.statusBar().showMessage("SQL 格式化成功", 2000)
+            if normalize_content(text) != normalize_content(formatted_text):
+                # 内容发生变化，弹出警告
+                QMessageBox.warning(
+                    self,
+                    "格式化警告",
+                    "格式化过程中检测到内容变更，建议手动格式化！"
+                )
+            
+            # 使用支持撤销的方式设置文本
+            cursor = editor.textCursor()
+            cursor.beginEditBlock()
+            try:
+                # 选择全部文本
+                cursor.select(cursor.SelectionType.Document)
+                # 替换为格式化后的文本
+                cursor.insertText(formatted_text)
+            finally:
+                cursor.endEditBlock()
+            
+            self.statusBar().showMessage("SQL 格式化完成", 2000)
         
         except Exception as e:
             QMessageBox.critical(
@@ -1085,10 +1140,10 @@ class MainWindow(QMainWindow):
         """显示关于对话框"""
         QMessageBox.about(
             self,
-            "关于 Publime",
-            "Publime 文本编辑器\n\n"
-            "一个使用 Python 和 PySide6 实现的文本编辑器\n"
-            "作为 Sublime Text 的平替方案"
+            "关于 Publime 文本编辑器",
+            f"版本: {VERSION}\n\n"
+            f"一个使用 Python 和 PySide6 实现的文本编辑器\n"
+            f"作为 Sublime Text 的平替工具"
         )
     
     def auto_save_all(self):
