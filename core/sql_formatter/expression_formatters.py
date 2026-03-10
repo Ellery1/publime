@@ -1085,10 +1085,9 @@ def format_from_clause_no_join(from_text: str, indent_level: int = 0) -> List[st
     base_indent = '  ' * indent_level
     result_lines = []
     
-    # 检查是否包含子查询(以括号开头)
+    # 检查是否是单个子查询(以括号开头，且右括号后没有逗号)
     from_text_stripped = from_text.strip()
     if from_text_stripped.startswith('(') and 'SELECT' in from_text_stripped.upper():
-        # 这是一个子查询
         # 找到匹配的右括号
         depth = 0
         i = 0
@@ -1100,58 +1099,60 @@ def format_from_clause_no_join(from_text: str, indent_level: int = 0) -> List[st
                 if depth == 0:
                     break
         
-        # 提取子查询内容(不包括外层括号)
-        subquery_content = from_text_stripped[1:i].strip()
-        # 提取别名(如果有)
-        alias = from_text_stripped[i+1:].strip()
+        # 检查右括号后是否有逗号（在别名之后）
+        remaining_after_paren = from_text_stripped[i+1:].strip()
+        # 如果右括号后有逗号，说明这是多个逗号分隔的子查询，不应该在这里处理
+        has_comma_after = ',' in remaining_after_paren
         
-        # 检查子查询中是否包含UNION ALL
-        # 需要检查在括号深度为0时是否有UNION ALL
-        has_union_all = False
-        depth_check = 0
-        j = 0
-        while j < len(subquery_content):
-            if subquery_content[j] == '(':
-                depth_check += 1
-            elif subquery_content[j] == ')':
-                depth_check -= 1
-            elif depth_check == 0:
-                # 检查是否是UNION ALL
-                remaining = subquery_content[j:].upper()
-                if remaining.startswith('UNION') and 'ALL' in remaining[:15]:
-                    has_union_all = True
-                    break
-            j += 1
-        
-        # 根据是否包含UNION ALL选择不同的格式化函数
-        if has_union_all:
-            from .formatters import format_union_query
-            formatted_subquery = format_union_query(subquery_content, indent_level=indent_level + 1)
-            # 移除末尾的分号
-            if formatted_subquery.endswith(';'):
-                formatted_subquery = formatted_subquery[:-1]
-        else:
-            from .formatters import format_select
-            # 子查询使用indent_level + 1，因为它在括号内部，比FROM子句深一层
-            formatted_subquery = format_select(subquery_content, indent_level=indent_level + 1)
-        
-        # 构建结果:左括号单独一行,子查询内容,右括号和别名单独一行
-        result_lines.append(base_indent + '  (')
-        # 添加格式化的子查询
-        # 子查询已经有了indent_level+1的缩进，我们需要再加上2个空格（括号内的缩进）
-        for line in formatted_subquery.split('\n'):
-            result_lines.append('  ' + line)
-        result_lines.append(base_indent + '  ) ' + alias if alias else base_indent + '  )')
-        
-        return result_lines
+        if not has_comma_after:
+            # 这是一个单独的子查询
+            # 提取子查询内容(不包括外层括号)
+            subquery_content = from_text_stripped[1:i].strip()
+            # 提取别名(如果有)
+            alias = remaining_after_paren
+            
+            # 检查子查询中是否包含UNION ALL
+            # 需要检查在括号深度为0时是否有UNION ALL
+            has_union_all = False
+            depth_check = 0
+            j = 0
+            while j < len(subquery_content):
+                if subquery_content[j] == '(':
+                    depth_check += 1
+                elif subquery_content[j] == ')':
+                    depth_check -= 1
+                elif depth_check == 0:
+                    # 检查是否是UNION ALL
+                    remaining = subquery_content[j:].upper()
+                    if remaining.startswith('UNION') and 'ALL' in remaining[:15]:
+                        has_union_all = True
+                        break
+                j += 1
+            
+            # 根据是否包含UNION ALL选择不同的格式化函数
+            if has_union_all:
+                from .formatters import format_union_query
+                formatted_subquery = format_union_query(subquery_content, indent_level=indent_level + 1)
+                # 移除末尾的分号
+                if formatted_subquery.endswith(';'):
+                    formatted_subquery = formatted_subquery[:-1]
+            else:
+                from .formatters import format_select
+                # 子查询使用indent_level + 1，因为它在括号内部，比FROM子句深一层
+                formatted_subquery = format_select(subquery_content, indent_level=indent_level + 1)
+            
+            # 构建结果:左括号单独一行,子查询内容,右括号和别名单独一行
+            result_lines.append(base_indent + '  (')
+            # 添加格式化的子查询
+            # 子查询已经有了indent_level+1的缩进，我们需要再加上2个空格（括号内的缩进）
+            for line in formatted_subquery.split('\n'):
+                result_lines.append('  ' + line)
+            result_lines.append(base_indent + '  ) ' + alias if alias else base_indent + '  )')
+            
+            return result_lines
     
-    # 检查是否包含JSON_TABLE
-    if 'JSON_TABLE' not in from_text.upper():
-        # 没有JSON_TABLE，直接返回
-        result_lines.append(base_indent + '  ' + from_text)
-        return result_lines
-    
-    # 分割表和JSON_TABLE（按逗号分割，但要考虑括号）
+    # 分割表和子查询（按逗号分割，但要考虑括号）
+    # 不管有没有JSON_TABLE，都需要检查是否有逗号分隔的多个表/子查询
     parts = []
     current = ''
     depth = 0
@@ -1170,6 +1171,11 @@ def format_from_clause_no_join(from_text: str, indent_level: int = 0) -> List[st
     if current.strip():
         parts.append(current.strip())
     
+    # 如果只有一个部分，且不包含JSON_TABLE和子查询，直接返回
+    if len(parts) == 1 and 'JSON_TABLE' not in from_text.upper() and not (parts[0].strip().startswith('(') and 'SELECT' in parts[0].upper()):
+        result_lines.append(base_indent + '  ' + from_text)
+        return result_lines
+    
     # 格式化每个部分
     for i, part in enumerate(parts):
         if 'JSON_TABLE' in part.upper():
@@ -1178,6 +1184,47 @@ def format_from_clause_no_join(from_text: str, indent_level: int = 0) -> List[st
             # 添加所有行（添加基础缩进）
             for line in formatted_json_table:
                 result_lines.append(base_indent + line)
+        elif part.strip().startswith('(') and 'SELECT' in part.upper():
+            # 这是一个子查询，需要格式化
+            # 找到匹配的右括号
+            depth_sub = 0
+            j = 0
+            for j, char in enumerate(part):
+                if char == '(':
+                    depth_sub += 1
+                elif char == ')':
+                    depth_sub -= 1
+                    if depth_sub == 0:
+                        break
+            
+            # 提取子查询内容(不包括外层括号)
+            subquery_content = part[1:j].strip()
+            # 提取别名(如果有)
+            alias = part[j+1:].strip()
+            
+            # 格式化子查询
+            from .formatters import format_select
+            formatted_subquery = format_select(subquery_content, indent_level=indent_level + 1)
+            
+            # 构建结果
+            if i == 0:
+                # 第一个子查询
+                result_lines.append(base_indent + '  (')
+            else:
+                # 后续子查询，逗号在前一行末尾已经添加了
+                result_lines.append(base_indent + '  (')
+            
+            # 添加格式化的子查询
+            for line in formatted_subquery.split('\n'):
+                result_lines.append('  ' + line)
+            
+            # 添加右括号和别名
+            if i < len(parts) - 1:
+                # 不是最后一个，添加逗号
+                result_lines.append(base_indent + '  ) ' + alias + ',' if alias else base_indent + '  ),')
+            else:
+                # 最后一个，不添加逗号
+                result_lines.append(base_indent + '  ) ' + alias if alias else base_indent + '  )')
         else:
             # 普通表
             if i < len(parts) - 1:
@@ -1301,13 +1348,32 @@ def format_join_clause(join_text: str, indent_level: int = 0) -> List[str]:
     from .utils import add_space_around_equals, remove_space_before_paren
     condition_parts = split_and_conditions(conditions)
     
-    # 处理第一个条件：确保等号周围有空格，移除函数括号空格
+    # 检查第一个条件是否包含IF函数
     first_cond = condition_parts[0]
-    first_cond = add_space_around_equals(first_cond)
-    first_cond = remove_space_before_paren(first_cond)
-    
-    # JOIN类型和表名在同一行，ON和第一个条件也在同一行
-    result_lines.append(base_indent + '  ' + join_type.upper() + ' ' + table_part + ' ON ' + first_cond)
+    if 'IF(' in first_cond.upper().replace(' ', '') or 'IF (' in first_cond.upper():
+        # 包含IF函数，需要特殊处理
+        # 格式化IF函数
+        formatted_if = format_if_function(first_cond, base_indent + '  ')
+        if '\n' in formatted_if:
+            # IF函数被格式化成多行
+            if_lines = formatted_if.split('\n')
+            # 第一行：JOIN类型 + 表名 + ON + IF函数的第一行
+            result_lines.append(base_indent + '  ' + join_type.upper() + ' ' + table_part + ' ON ' + if_lines[0].strip())
+            # 添加IF函数的其余行
+            for line in if_lines[1:]:
+                result_lines.append(line)
+        else:
+            # IF函数没有被格式化（参数简单），按普通条件处理
+            first_cond = add_space_around_equals(first_cond)
+            first_cond = remove_space_before_paren(first_cond)
+            result_lines.append(base_indent + '  ' + join_type.upper() + ' ' + table_part + ' ON ' + first_cond)
+    else:
+        # 处理第一个条件：确保等号周围有空格，移除函数括号空格
+        first_cond = add_space_around_equals(first_cond)
+        first_cond = remove_space_before_paren(first_cond)
+        
+        # JOIN类型和表名在同一行，ON和第一个条件也在同一行
+        result_lines.append(base_indent + '  ' + join_type.upper() + ' ' + table_part + ' ON ' + first_cond)
     
     # 其余条件，每个单独一行
     for cond in condition_parts[1:]:
@@ -1899,5 +1965,198 @@ def format_window_function(expr: str, indent_level: int) -> str:
         as_clause = ' ' + as_clause
     
     result_lines.append(f'{base_indent}){as_clause}')
+    
+    return '\n'.join(result_lines)
+
+
+
+def format_exists_subquery(condition: str, base_indent: str = '') -> str:
+    """
+    格式化 EXISTS/NOT EXISTS 子查询
+    
+    例如:
+    NOT EXISTS(SELECT 1 FROM t WHERE ...) 
+    -> 
+    NOT EXISTS (
+      SELECT
+        1
+      FROM
+        t
+      WHERE
+        ...
+    )
+    
+    Args:
+        condition: 包含EXISTS的条件
+        base_indent: 基础缩进
+        
+    Returns:
+        格式化后的条件
+    """
+    # 查找 EXISTS 关键字（可能前面有 NOT）
+    exists_match = re.search(r'(NOT\s+)?EXISTS\s*\(', condition, re.IGNORECASE)
+    if not exists_match:
+        return condition
+    
+    # 提取 NOT EXISTS 或 EXISTS
+    exists_keyword = exists_match.group(0).strip()
+    # 确保 EXISTS 后有空格
+    if exists_keyword.upper().endswith('EXISTS('):
+        exists_keyword = exists_keyword[:-1] + ' ('
+    elif exists_keyword.upper().endswith('EXISTS ('):
+        pass  # 已经有空格了
+    
+    # 找到 EXISTS 后的左括号位置
+    paren_start = condition.find('(', exists_match.start())
+    if paren_start == -1:
+        return condition
+    
+    # 找到对应的右括号
+    depth = 1
+    i = paren_start + 1
+    while i < len(condition) and depth > 0:
+        if condition[i] == '(':
+            depth += 1
+        elif condition[i] == ')':
+            depth -= 1
+        i += 1
+    
+    if depth != 0:
+        # 括号不匹配，返回原始条件
+        return condition
+    
+    paren_end = i - 1
+    
+    # 提取子查询内容
+    subquery = condition[paren_start + 1:paren_end].strip()
+    
+    # 格式化子查询
+    from .formatters import format_select
+    # 子查询的缩进级别：相对于 NOT EXISTS 缩进1级（2个空格）
+    # base_indent 是 WHERE 的缩进（如 '  '），子查询应该在 base_indent + '  ' 的基础上
+    indent_level = (len(base_indent) + 2) // 2
+    formatted_subquery = format_select(subquery, indent_level=indent_level)
+    
+    # 构建结果
+    result_lines = []
+    result_lines.append(base_indent + exists_keyword.upper())
+    # 添加格式化的子查询（已经包含了完整的缩进，直接添加）
+    for line in formatted_subquery.split('\n'):
+        result_lines.append(line)
+    result_lines.append(base_indent + ')')
+    
+    # 添加 EXISTS 后面的内容（如果有）
+    remaining = condition[paren_end + 1:].strip()
+    if remaining:
+        result_lines[-1] += ' ' + remaining
+    
+    return '\n'.join(result_lines)
+
+
+
+def format_if_function(expression: str, base_indent: str = '') -> str:
+    """
+    格式化 IF 函数，将参数换行
+    
+    例如:
+    a.duebill_no = IF(c.duebill_no like '%-0%', LEFT(c.duebill_no, LENGTH(c.duebill_no) - 3), c.duebill_no)
+    ->
+    a.duebill_no = IF(
+      c.duebill_no like '%-0%',
+      LEFT(c.duebill_no, LENGTH(c.duebill_no) - 3),
+      c.duebill_no
+    )
+    
+    Args:
+        expression: 包含IF函数的表达式
+        base_indent: 基础缩进
+        
+    Returns:
+        格式化后的表达式（可能包含多行）
+    """
+    # 查找 IF 函数
+    if_match = re.search(r'\bIF\s*\(', expression, re.IGNORECASE)
+    if not if_match:
+        return expression
+    
+    # 找到 IF 后的左括号位置
+    paren_start = expression.find('(', if_match.start())
+    if paren_start == -1:
+        return expression
+    
+    # 找到对应的右括号
+    depth = 1
+    i = paren_start + 1
+    while i < len(expression) and depth > 0:
+        if expression[i] == '(':
+            depth += 1
+        elif expression[i] == ')':
+            depth -= 1
+        i += 1
+    
+    if depth != 0:
+        # 括号不匹配，返回原始表达式
+        return expression
+    
+    paren_end = i - 1
+    
+    # 提取IF函数的参数
+    params_str = expression[paren_start + 1:paren_end].strip()
+    
+    # 分割参数（考虑括号深度）
+    params = []
+    current = ''
+    depth = 0
+    for char in params_str:
+        if char == '(':
+            depth += 1
+            current += char
+        elif char == ')':
+            depth -= 1
+            current += char
+        elif char == ',' and depth == 0:
+            params.append(current.strip())
+            current = ''
+        else:
+            current += char
+    
+    if current.strip():
+        params.append(current.strip())
+    
+    # 如果参数少于3个，不换行
+    if len(params) < 3:
+        return expression
+    
+    # 检查参数是否复杂（包含函数调用或长度超过30）
+    is_complex = False
+    for param in params:
+        if '(' in param or len(param) > 30:
+            is_complex = True
+            break
+    
+    if not is_complex:
+        return expression
+    
+    # 移除参数中函数名和括号之间的空格
+    from .utils import remove_space_before_paren
+    formatted_params = [remove_space_before_paren(param) for param in params]
+    
+    # 构建格式化后的IF函数
+    # IF 前面的部分（如 "a.duebill_no = "）
+    before_if = expression[:if_match.start()]
+    # IF 后面的部分
+    after_if = expression[paren_end + 1:]
+    
+    result_lines = []
+    # 第一行：前缀 + IF(
+    result_lines.append(base_indent + before_if + 'IF(')
+    # 参数行
+    for i, param in enumerate(formatted_params):
+        if i < len(formatted_params) - 1:
+            result_lines.append(base_indent + '  ' + param + ',')
+        else:
+            result_lines.append(base_indent + '  ' + param)
+    # 右括号行
+    result_lines.append(base_indent + ')' + after_if)
     
     return '\n'.join(result_lines)

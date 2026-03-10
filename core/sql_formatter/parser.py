@@ -260,58 +260,65 @@ def parse_select_statement(statement: str) -> dict:
             remaining = statement[i:].upper()
             
             # 检查是否是另一个 SQL 语句的开始（只在深度为0时）
-            # 注意：需要检查关键字后面的字符，确保不是标识符的一部分
-            # 使用 isalnum() 或 '_' 来判断是否是标识符的一部分
-            def is_keyword_boundary(text, keyword_len):
-                """检查关键字后面是否是边界（不是标识符的一部分）"""
-                if len(text) == keyword_len:
-                    return True
-                next_char = text[keyword_len]
-                # 如果下一个字符是字母、数字或下划线，说明是标识符的一部分
-                return not (next_char.isalnum() or next_char == '_')
+            # 注意：需要检查关键字前后的字符，确保不是标识符的一部分
+            def is_keyword_boundary(pos, keyword_len):
+                """检查关键字前后是否是边界（不是标识符的一部分）"""
+                # 检查前面的字符
+                if pos > 0:
+                    prev_char = statement[pos - 1]
+                    if prev_char.isalnum() or prev_char == '_':
+                        return False
+                
+                # 检查后面的字符
+                if pos + keyword_len < len(statement):
+                    next_char = statement[pos + keyword_len]
+                    if next_char.isalnum() or next_char == '_':
+                        return False
+                
+                return True
             
-            if remaining.startswith('SELECT') and is_keyword_boundary(remaining, 6) or \
-               remaining.startswith('CREATE') and is_keyword_boundary(remaining, 6) or \
-               remaining.startswith('UPDATE') and is_keyword_boundary(remaining, 6) or \
-               remaining.startswith('DELETE') and is_keyword_boundary(remaining, 6) or \
-               remaining.startswith('INSERT') and is_keyword_boundary(remaining, 6) or \
-               remaining.startswith('WITH') and is_keyword_boundary(remaining, 4) or \
-               remaining.startswith('USE') and is_keyword_boundary(remaining, 3):
+            if remaining.startswith('SELECT') and is_keyword_boundary(i, 6) or \
+               remaining.startswith('CREATE') and is_keyword_boundary(i, 6) or \
+               remaining.startswith('UPDATE') and is_keyword_boundary(i, 6) or \
+               remaining.startswith('DELETE') and is_keyword_boundary(i, 6) or \
+               remaining.startswith('INSERT') and is_keyword_boundary(i, 6) or \
+               remaining.startswith('WITH') and is_keyword_boundary(i, 4) or \
+               remaining.startswith('USE') and is_keyword_boundary(i, 3):
                 # 遇到新的 SQL 语句，停止解析
                 # 但是，如果当前正在解析的是FROM子句，那么这可能是一个子查询，不应该停止解析
                 if current_part != 'from':
                     break
-            elif remaining.startswith('FROM') and is_keyword_boundary(remaining, 4):
+            elif remaining.startswith('FROM') and is_keyword_boundary(i, 4):
                 parts[current_part] = current_content.strip()
                 current_part = 'from'
                 current_content = ''
                 i += 4  # len('FROM')
                 continue
-            elif remaining.startswith('WHERE') and is_keyword_boundary(remaining, 5):
+            elif remaining.startswith('WHERE') and is_keyword_boundary(i, 5):
                 parts[current_part] = current_content.strip()
                 current_part = 'where'
                 current_content = ''
                 i += 5  # len('WHERE')
                 continue
-            elif remaining.startswith('GROUP BY') and is_keyword_boundary(remaining, 8):
+            elif remaining.startswith('GROUP BY') and is_keyword_boundary(i, 8):
                 parts[current_part] = current_content.strip()
                 current_part = 'group_by'
                 current_content = ''
                 i += 8  # len('GROUP BY')
                 continue
-            elif remaining.startswith('HAVING') and is_keyword_boundary(remaining, 6):
+            elif remaining.startswith('HAVING') and is_keyword_boundary(i, 6):
                 parts[current_part] = current_content.strip()
                 current_part = 'having'
                 current_content = ''
                 i += 6  # len('HAVING')
                 continue
-            elif remaining.startswith('ORDER BY') and is_keyword_boundary(remaining, 8):
+            elif remaining.startswith('ORDER BY') and is_keyword_boundary(i, 8):
                 parts[current_part] = current_content.strip()
                 current_part = 'order_by'
                 current_content = ''
                 i += 8  # len('ORDER BY')
                 continue
-            elif remaining.startswith('LIMIT') and is_keyword_boundary(remaining, 5):
+            elif remaining.startswith('LIMIT') and is_keyword_boundary(i, 5):
                 parts[current_part] = current_content.strip()
                 current_part = 'limit'
                 current_content = ''

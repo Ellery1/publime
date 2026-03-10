@@ -613,6 +613,27 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                             result_lines.extend(formatted_lines[1:])
                     continue
             
+            # 检查是否包含 EXISTS/NOT EXISTS 子查询
+            if 'EXISTS' in cond.upper() and '(' in cond:
+                from .expression_formatters import format_exists_subquery
+                formatted_cond = format_exists_subquery(cond, base_indent + '  ')
+                # 如果格式化后包含换行，说明是多行的EXISTS子查询
+                if '\n' in formatted_cond:
+                    cond_lines = formatted_cond.split('\n')
+                    if i == 0:
+                        result_lines.extend(cond_lines)
+                    else:
+                        # 第一行前面加上 AND
+                        result_lines.append(base_indent + '  AND ' + cond_lines[0].strip())
+                        result_lines.extend(cond_lines[1:])
+                    # 如果有行内注释，添加到最后
+                    if inline_comment:
+                        result_lines.append(base_indent + '  ' + inline_comment)
+                    continue
+                else:
+                    # 单行的EXISTS，按普通条件处理
+                    cond = formatted_cond
+            
             # 普通条件处理
             # 移除函数名和左括号之间的空格
             cond = remove_space_before_paren(cond)

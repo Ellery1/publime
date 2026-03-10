@@ -451,3 +451,135 @@ ORDER BY
 - complex_test.sql 的格式化结果仍然正确
 - sample_1.sql 的格式化结果仍然正确
 - 没有引入新的格式化问题
+
+
+## 12. SS.sql Bug修复说明
+
+### 12.1 问题描述
+ss.sql 格式化后的结果与 ss_target.sql 不一致，主要问题包括：
+
+1. **逗号分隔的子查询未格式化**：FROM子句中逗号分隔的多个子查询，第二个子查询没有格式化
+2. **NOT EXISTS子查询未格式化**：NOT EXISTS后的子查询全部在一行，没有换行和缩进
+3. **IF函数参数未换行**：IF函数的多个参数应该换行缩进
+
+### 12.2 问题详解
+
+#### 问题1：逗号分隔的子查询
+**错误示例**：
+```sql
+FROM
+  (
+    SELECT
+      ...
+  ) aa, ( SELECT a.duebill_no accduebill, sum(c.receivable_interest) sumacc FROM core_ms.t_duebill_info a INNER JOIN account_ms.c_accrual_detail c ON ... WHERE ... GROUP BY a.duebill_no ) bb
+```
+
+**正确格式**：
+```sql
+FROM
+  (
+    SELECT
+      ...
+  ) aa,
+  (
+    SELECT
+      a.duebill_no accduebill,
+      sum(c.receivable_interest) sumacc
+    FROM
+      core_ms.t_duebill_info a
+      INNER JOIN account_ms.c_accrual_detail c ON ...
+    WHERE
+      ...
+    GROUP BY
+      a.duebill_no
+  ) bb
+```
+
+**规则**：
+- 逗号后必须换行
+- 第二个子查询的开始括号单独一行并缩进
+- 子查询内部按照标准规则格式化
+
+#### 问题2：NOT EXISTS子查询
+**错误示例**：
+```sql
+WHERE
+  NOT EXISTS(SELECT 1 FROM core_ms.t_buy_back_record e WHERE e.duebill_no = f.duebill_no AND e.gmt_create >= CURRENT_DATE AND e.business_status = 3)
+```
+
+**正确格式**：
+```sql
+WHERE
+  NOT EXISTS (
+    SELECT
+      1
+    FROM
+      core_ms.t_buy_back_record e
+    WHERE
+      e.duebill_no = f.duebill_no
+      AND e.gmt_create >= CURRENT_DATE
+      AND e.business_status = 3
+  )
+```
+
+**规则**：
+- NOT EXISTS 后必须有空格
+- 开始括号后换行
+- 子查询内部按照标准规则格式化
+- 每个条件单独一行，AND放在行首
+
+#### 问题3：IF函数参数换行
+**错误示例**：
+```sql
+IF(c.duebill_no like '%-0%', LEFT (c.duebill_no, LENGTH(c.duebill_no) - 3), c.duebill_no)
+```
+
+**正确格式**：
+```sql
+IF(
+  c.duebill_no like '%-0%',
+  LEFT(c.duebill_no, LENGTH(c.duebill_no) - 3),
+  c.duebill_no
+)
+```
+
+**规则**：
+- IF函数的开始括号后换行
+- 每个参数单独一行并缩进
+- 参数之间的逗号放在行尾
+- 结束括号单独一行，与IF对齐
+
+### 12.3 格式化规则补充
+
+#### 12.3.1 FROM子句中的多个表/子查询
+当FROM子句包含多个表或子查询（用逗号分隔）时：
+1. 第一个表/子查询紧跟FROM后换行
+2. 后续的表/子查询：逗号放在前一个表/子查询的结束括号后，然后换行
+3. 每个子查询都要完整格式化
+
+#### 12.3.2 EXISTS/NOT EXISTS子查询
+1. EXISTS/NOT EXISTS 后必须有空格
+2. 开始括号后立即换行
+3. 子查询内容按标准规则格式化并缩进
+4. 结束括号单独一行
+
+#### 12.3.3 多参数函数格式化
+对于有多个参数的函数（如IF, COALESCE, CONCAT等）：
+1. 如果参数较少且简单，可以保持在一行
+2. 如果参数复杂或较多（3个以上），应该换行：
+   - 开始括号后换行
+   - 每个参数单独一行并缩进
+   - 结束括号单独一行
+
+### 12.4 修复优先级
+1. **最高优先级**：确保不修改SQL内容（只修改空白字符）
+2. **高优先级**：逗号分隔的子查询格式化、NOT EXISTS子查询格式化
+3. **中优先级**：IF函数参数换行
+4. **低优先级**：代码可读性优化
+
+### 12.5 回归测试
+修复ss.sql问题后，必须确保：
+- complex_test.sql 的格式化结果仍然正确
+- sample_1.sql 的格式化结果仍然正确
+- sample_2.sql 的格式化结果仍然正确
+- 没有引入新的格式化问题
