@@ -206,14 +206,104 @@ def format_statement(statement: str) -> str:
     
     # 新步骤：在合并成一行之前，先提取并标记行内注释
     # 使用 __COMMENT__ 标记来保护注释
-    comment_pattern = r'(--[^\n]*)'
-    comment_matches = list(re.finditer(comment_pattern, sql_without_comments))
+    #
+    # 特殊处理：单行SQL中的行内注释
+    # 例如: "productNo,-- 产品编号 xc.NAME AS productName,-- 产品名称"
+    # 这里 "-- 产品编号" 后面的 "xc.NAME AS productName," 不是注释，而是SQL代码
+    # 需要启发式地截断注释
     
-    # 替换注释为标记
-    sql_with_markers = sql_without_comments
-    for match in reversed(comment_matches):  # 从后往前替换，避免位置偏移
-        comment_text = match.group(1)
-        sql_with_markers = sql_with_markers[:match.start()] + f'__COMMENT__{comment_text}__COMMENT__' + sql_with_markers[match.end():]
+    def find_sql_code_start(text: str) -> int:
+        """在注释内容中找到SQL代码开始的位置，返回-1表示没找到"""
+        tokens = text.split()
+        pos = 0
+        for idx, token in enumerate(tokens):
+            token_start = text.find(token, pos)
+            # 遇到另一个 -- 注释
+            if token.startswith('--') and idx > 0:
+                return token_start
+            # SQL标识符（包含点号，如 xc.NAME）
+            if '.' in token and not token.startswith('.') and not token.endswith('.'):
+                parts_t = token.split('.')
+                if all(re.match(r'^[a-zA-Z_`]', p) for p in parts_t if p):
+                    return token_start
+            # SQL函数调用（如 sum(, if(, count(）
+            if re.match(r'^[a-zA-Z_]\w*\(', token, re.IGNORECASE):
+                return token_start
+            # SQL关键字（在注释内容中间，不是开头）
+            sql_kw_set = {'SELECT', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING',
+                          'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT',
+                          'RIGHT', 'INNER', 'OUTER', 'ON', 'SET', 'INTO', 'VALUES'}
+            if token.upper() in sql_kw_set and idx > 0:
+                return token_start
+            pos = token_start + len(token)
+        return -1
+    
+    def process_inline_comments(sql_text: str) -> str:
+        """处理SQL文本中的行内注释，将它们正确标记"""
+        result = ''
+        i = 0
+        in_string = False
+        string_char = ''
+        while i < len(sql_text):
+            char = sql_text[i]
+            # 处理字符串
+            if char in ("'", '"') and not in_string:
+                in_string = True
+                string_char = char
+                result += char
+                i += 1
+                continue
+            elif in_string and char == string_char:
+                in_string = False
+                result += char
+                i += 1
+                continue
+            elif in_string:
+                result += char
+                i += 1
+                continue
+            # 检查是否是 -- 注释
+            if char == '-' and i + 1 < len(sql_text) and sql_text[i + 1] == '-':
+                comment_start = i
+                line_end = sql_text.find('\n', i)
+                if line_end == -1:
+                    line_end = len(sql_text)
+                comment_content = sql_text[i + 2:line_end]  # 去掉 --
+                # 在注释内容中查找SQL代码
+                sql_start = find_sql_code_start(comment_content)
+                if sql_start >= 0:
+                    # 找到了SQL代码，截断注释
+                    real_comment = '--' + comment_content[:sql_start].rstrip()
+                    result += f'__COMMENT__{real_comment}__COMMENT__ '
+                    i = comment_start + 2 + sql_start
+                else:
+                    # 没有找到SQL代码，整个都是注释
+                    full_comment = '--' + comment_content
+                    # 检查是否有多个连续 -- 注释
+                    sub_positions = []
+                    search_pos = 2
+                    while True:
+                        next_dash = full_comment.find('--', search_pos)
+                        if next_dash == -1:
+                            break
+                        sub_positions.append(next_dash)
+                        search_pos = next_dash + 2
+                    if sub_positions:
+                        positions = [0] + sub_positions
+                        for ci, p in enumerate(positions):
+                            end = positions[ci + 1] if ci + 1 < len(positions) else len(full_comment)
+                            single_comment = full_comment[p:end].rstrip()
+                            if single_comment:
+                                result += f'__COMMENT__{single_comment}__COMMENT__ '
+                    else:
+                        result += f'__COMMENT__{full_comment}__COMMENT__'
+                    i = line_end
+                continue
+            result += char
+            i += 1
+        return result
+    
+    sql_with_markers = process_inline_comments(sql_without_comments)
     
     # 清理SQL语句，移除多余的空白字符（但保留注释标记）
     sql_with_markers = ' '.join(sql_with_markers.split())
@@ -222,7 +312,10 @@ def format_statement(statement: str) -> str:
     sql_with_markers = separate_keywords(sql_with_markers)
     
     # 恢复注释
-    sql_without_comments = re.sub(r'__COMMENT__(--.*?)__COMMENT__', r'\n\1\n', sql_with_markers)
+    sql_without_comments = re.sub(r'__COMMENT__(--.*?)__COMMENT__\s*', r'\n\1\n', sql_with_markers)
+    # 清理连续空行
+    while '\n\n\n' in sql_without_comments:
+        sql_without_comments = sql_without_comments.replace('\n\n\n', '\n\n')
     
     # 如果原始SQL没有分号，移除我们添加的分号
     if not original_has_semicolon:
@@ -271,6 +364,30 @@ def format_statement(statement: str) -> str:
         return '\n'.join(result_lines)
     else:
         return formatted
+
+
+def _add_space_in_if_params(col: str) -> str:
+    """对IF函数参数内部添加等号空格，不影响IF外部"""
+    if_match = re.search(r'\bif\s*\(', col, re.IGNORECASE)
+    if not if_match:
+        return col
+    paren_start = col.find('(', if_match.start())
+    if paren_start == -1:
+        return col
+    depth = 1
+    i = paren_start + 1
+    while i < len(col) and depth > 0:
+        if col[i] == '(':
+            depth += 1
+        elif col[i] == ')':
+            depth -= 1
+        i += 1
+    paren_end = i
+    before = col[:paren_start + 1]
+    inside = col[paren_start + 1:paren_end - 1]
+    after = col[paren_end - 1:]
+    inside = add_space_around_equals(inside)
+    return before + inside + after
 
 
 def format_select(statement: str, indent_level: int = 0) -> str:
@@ -362,17 +479,27 @@ def format_select(statement: str, indent_level: int = 0) -> str:
         comment_text = comment_match.group(1)
         comment_pos = comment_match.start()
         
-        # 计算注释前有多少个逗号（在深度为0时）
+        # 在原始带标记的文本中，计算注释前有多少个深度为0的逗号
         col_index = 0
         depth = 0
-        for i in range(comment_pos):
-            char = select_cols_with_markers[i]
+        i = 0
+        while i < comment_pos and i < len(select_cols_original):
+            # 跳过 __COMMENT__....__COMMENT__ 标记内容
+            if select_cols_original[i:i+11] == '__COMMENT__':
+                end_marker = select_cols_original.find('__COMMENT__', i + 11)
+                if end_marker != -1:
+                    i = end_marker + 11
+                    continue
+                else:
+                    break
+            char = select_cols_original[i]
             if char == '(':
                 depth += 1
             elif char == ')':
                 depth -= 1
             elif char == ',' and depth == 0:
                 col_index += 1
+            i += 1
         
         inline_comments_by_col[col_index] = comment_text
     
@@ -501,9 +628,28 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                         result_lines.append(base_indent + f'  {col},')
                     else:
                         result_lines.append(base_indent + f'  {col}')
+            # 检查列中是否包含IF函数（嵌套括号>=2表示复杂IF）
+            elif re.search(r'\bif\s*\(', col, re.IGNORECASE) and col.count('(') >= 2:
+                from .expression_formatters import format_if_function
+                formatted_if = format_if_function(col, base_indent + '  ')
+                if '\n' in formatted_if:
+                    if_lines = formatted_if.split('\n')
+                    if i < len(cols) - 1:
+                        if_lines[-1] += ','
+                    for line in if_lines:
+                        result_lines.append(line)
+                else:
+                    formatted_if = remove_space_before_paren(formatted_if)
+                    if i < len(cols) - 1:
+                        result_lines.append(base_indent + f'  {formatted_if},')
+                    else:
+                        result_lines.append(base_indent + f'  {formatted_if}')
             else:
                 # 普通列，移除函数括号前后的空格
                 col = remove_space_before_paren(col)
+                # 对包含IF函数的列，在IF参数内部添加等号空格
+                if re.search(r'\bif\s*\(', col, re.IGNORECASE):
+                    col = _add_space_in_if_params(col)
                 if i < len(cols) - 1:
                     result_lines.append(base_indent + f'  {col},')
                 else:
@@ -572,12 +718,17 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 continue
             
             # 检查是否有行内注释（在split_and_conditions之前就要处理）
-            inline_comment = ''
+            inline_comments = []
             if '--' in cond:
                 # 找到注释的位置
                 comment_pos = cond.find('--')
-                inline_comment = cond[comment_pos:].strip()
+                comment_text = cond[comment_pos:].strip()
                 cond = cond[:comment_pos].strip()
+                # 分割多个注释（可能包含换行）
+                for comment_line in comment_text.split('\n'):
+                    comment_line = comment_line.strip()
+                    if comment_line.startswith('--'):
+                        inline_comments.append(comment_line)
             
             # 检查是否是嵌套括号条件（以(开头且包含嵌套括号）
             cond_stripped = cond.strip()
@@ -627,8 +778,9 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                         result_lines.append(base_indent + '  AND ' + cond_lines[0].strip())
                         result_lines.extend(cond_lines[1:])
                     # 如果有行内注释，添加到最后
-                    if inline_comment:
-                        result_lines.append(base_indent + '  ' + inline_comment)
+                    if inline_comments:
+                        for ic in inline_comments:
+                            result_lines.append(base_indent + '  ' + ic)
                     continue
                 else:
                     # 单行的EXISTS，按普通条件处理
@@ -653,19 +805,22 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 for line in cond_lines[1:]:
                     result_lines.append(base_indent + '  ' + line)
                 # 如果有行内注释，添加到最后
-                if inline_comment:
-                    result_lines.append(base_indent + '  ' + inline_comment)
+                if inline_comments:
+                    for ic in inline_comments:
+                        result_lines.append(base_indent + '  ' + ic)
             else:
                 if i == 0:
                     # 如果有行内注释，条件和注释分别在不同行
                     result_lines.append(base_indent + '  ' + cond)
-                    if inline_comment:
-                        result_lines.append(base_indent + '  ' + inline_comment)
+                    if inline_comments:
+                        for ic in inline_comments:
+                            result_lines.append(base_indent + '  ' + ic)
                 else:
                     # 如果有行内注释，条件和注释分别在不同行
                     result_lines.append(base_indent + '  AND ' + cond)
-                    if inline_comment:
-                        result_lines.append(base_indent + '  ' + inline_comment)
+                    if inline_comments:
+                        for ic in inline_comments:
+                            result_lines.append(base_indent + '  ' + ic)
     
     # GROUP BY
     groupby_clause = parts.get('group_by', '')

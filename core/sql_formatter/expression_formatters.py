@@ -1312,14 +1312,11 @@ def format_join_clause(join_text: str, indent_level: int = 0) -> List[str]:
                 first_cond = remove_space_before_paren(first_cond)
                 result_lines.append(base_indent + '  ) ' + alias + ' ON ' + first_cond if alias else base_indent + '  ) ON ' + first_cond)
             else:
-                # 多个条件，别名单独一行
-                result_lines.append(base_indent + '  ) ' + alias if alias else base_indent + '  )')
-                
-                # 第一个条件
+                # 多个条件，第一个ON条件和别名在同一行
                 first_cond = condition_parts[0]
                 first_cond = add_space_around_equals(first_cond)
                 first_cond = remove_space_before_paren(first_cond)
-                result_lines.append(base_indent + '  ON ' + first_cond)
+                result_lines.append(base_indent + '  ) ' + alias + ' ON ' + first_cond if alias else base_indent + '  ) ON ' + first_cond)
                 
                 # 其余条件
                 for cond in condition_parts[1:]:
@@ -2137,9 +2134,9 @@ def format_if_function(expression: str, base_indent: str = '') -> str:
     if not is_complex:
         return expression
     
-    # 移除参数中函数名和括号之间的空格
-    from .utils import remove_space_before_paren
-    formatted_params = [remove_space_before_paren(param) for param in params]
+    # 移除参数中函数名和括号之间的空格，并在等号周围添加空格
+    from .utils import remove_space_before_paren, add_space_around_equals
+    formatted_params = [add_space_around_equals(remove_space_before_paren(param)) for param in params]
     
     # 构建格式化后的IF函数
     # IF 前面的部分（如 "a.duebill_no = "）
@@ -2147,9 +2144,12 @@ def format_if_function(expression: str, base_indent: str = '') -> str:
     # IF 后面的部分
     after_if = expression[paren_end + 1:]
     
+    # 保留原始IF大小写
+    original_if = expression[if_match.start():if_match.end()].rstrip('(').rstrip()
+    
     result_lines = []
-    # 第一行：前缀 + IF(
-    result_lines.append(base_indent + before_if + 'IF(')
+    # 第一行：前缀 + if(  (保留原始大小写)
+    result_lines.append(base_indent + before_if + original_if + '(')
     # 参数行
     for i, param in enumerate(formatted_params):
         if i < len(formatted_params) - 1:

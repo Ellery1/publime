@@ -23,7 +23,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v1.0"
+VERSION = "v1.2"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -1141,7 +1141,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "关于 Publime 文本编辑器",
-            f"版本: {VERSION}\n\n"
+            f"版本: {VERSION}，感谢小勇哥提的bug\n\n"
             f"一个使用 Python 和 PySide6 实现的文本编辑器\n"
             f"作为 Sublime Text 的平替工具"
         )
