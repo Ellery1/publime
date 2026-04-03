@@ -1,6 +1,6 @@
 SELECT
   count(1)
-from
+FROM
   (
     SELECT
       t.duebill_no,
@@ -12,19 +12,19 @@ from
       t.settlement_date,
       t.end_date,
       t.payment_time
-    from
+    FROM
       (
         SELECT
           *
-        from
+        FROM
           (
             SELECT
               a.duebill_no schduebill,
               sum(b.sch_interest) sumsch
             FROM
               core_ms.t_duebill_info a
-              inner join core_ms.t_repayment_schedule b on a.duebill_no = b.duebill_no
-            where
+              INNER JOIN core_ms.t_repayment_schedule b ON a.duebill_no = b.duebill_no
+            WHERE
               (
                 (
                   a.clear_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH)
@@ -37,9 +37,9 @@ from
                   and a.duebill_status != 3
                 )
               )
-              and a.op_flag != 'DELETE'
-              and b.op_flag != 'DELETE'
-            GROUP by
+              AND a.op_flag != 'DELETE'
+              AND b.op_flag != 'DELETE'
+            GROUP BY
               a.duebill_no
           ) aa,
           (
@@ -48,13 +48,13 @@ from
               sum(c.receivable_interest) sumacc
             FROM
               core_ms.t_duebill_info a
-              inner join account_ms.c_accrual_detail c on a.duebill_no = IF(
+              INNER JOIN account_ms.c_accrual_detail c ON a.duebill_no = IF(
                 c.duebill_no like '%-0%',
                 LEFT(c.duebill_no, LENGTH(c.duebill_no) - 3),
                 c.duebill_no
               )
               and c.accrual_type != '4'
-            where
+            WHERE
               (
                 (
                   a.clear_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH)
@@ -67,16 +67,16 @@ from
                   and a.duebill_status != 3
                 )
               )
-              and a.op_flag != 'DELETE'
-              and c.op_flag != 'DELETE'
-            GROUP by
+              AND a.op_flag != 'DELETE'
+              AND c.op_flag != 'DELETE'
+            GROUP BY
               a.duebill_no
           ) bb
-        where
+        WHERE
           aa.schduebill = bb.accduebill
-          and aa.sumsch != bb.sumacc
+          AND aa.sumsch != bb.sumacc
       ) d
-      inner join core_ms.t_duebill_info t on d.schduebill = t.duebill_no
+      INNER JOIN core_ms.t_duebill_info t ON d.schduebill = t.duebill_no
   ) f
 WHERE
   NOT EXISTS (
@@ -86,6 +86,6 @@ WHERE
       core_ms.t_buy_back_record e
     WHERE
       e.duebill_no = f.duebill_no
-      and e.gmt_create >= CURRENT_DATE
-      and e.business_status = 3
+      AND e.gmt_create >= CURRENT_DATE
+      AND e.business_status = 3
   );

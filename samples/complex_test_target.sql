@@ -45,7 +45,8 @@ ORDER BY
   total_orders DESC
 LIMIT
   100;
-  -- 创建临时表存储结果
+
+-- 创建临时表存储结果
 CREATE TEMPORARY TABLE IF NOT EXISTS top_customers AS WITH customer_stats AS(
   SELECT
     user_id,
@@ -86,7 +87,8 @@ FROM
   JOIN users u ON rc.user_id = u.user_id
 WHERE
   value_quartile IN (1, 2);
-  /* 更新用户等级 */
+
+/* 更新用户等级 */
 UPDATE
   users
 SET
@@ -119,19 +121,21 @@ SET
     ) THEN 'silver'
     ELSE 'bronze'
   END,
-  updated_at = NOW()
+  updated_at = NOW() 
   -- 更新时间戳
 WHERE
   is_active = 1;
-  -- 删除过期数据
+
+-- 删除过期数据
 DELETE FROM
   order_logs
 WHERE
   created_at < DATE_SUB(NOW(), INTERVAL 90 DAY)
   AND log_type = 'debug';
-  /* 插入汇总数据 */
+
+/* 插入汇总数据 */
 INSERT INTO
-  daily_summary(
+  daily_summary (
     summary_date,
     total_orders,
     total_revenue,
@@ -147,12 +151,11 @@ SELECT
 FROM
   orders
 WHERE
-  order_date >= CURDATE() - INTERVAL 1 DAY
+  order_date >= CURDATE()-INTERVAL 1 DAY
 GROUP BY
-  DATE(order_date) ON DUPLICATE KEY
+  DATE(order_date)
+ON DUPLICATE KEY
 UPDATE
-  total_orders =
-VALUES(total_orders),
-  total_revenue =
-VALUES(total_revenue),
+  total_orders = VALUES(total_orders),
+  total_revenue = VALUES(total_revenue),
   updated_at = NOW();

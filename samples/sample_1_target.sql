@@ -1,9 +1,11 @@
--- SQL示例文件 
+-- SQL 示例文件
 -- 演示SQL语法高亮效果
--- 创建数据库 
+-- 创建数据库
 CREATE DATABASE IF NOT EXISTS company_db;
+
 USE company_db;
-  -- 创建员工表
+
+-- 创建员工表
 CREATE TABLE employees (
   id INT PRIMARY KEY AUTO_INCREMENT,
   first_name VARCHAR(50) NOT NULL,
@@ -19,21 +21,45 @@ CREATE TABLE employees (
   FOREIGN KEY (department_id) REFERENCES departments(id),
   FOREIGN KEY (manager_id) REFERENCES employees(id)
 );
-  -- 创建部门表
+
+-- 创建部门表
 CREATE TABLE departments (
   id INT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(100) NOT NULL,
   location VARCHAR(100),
   budget DECIMAL(15, 2)
 );
+
+-- 插入部门数据
 INSERT INTO
-  departments (name, location, budget)
+  departments (
+    name,
+    location,
+    budget
+  )
 VALUES
-  ('Engineering', 'San Francisco', 1000000.00),
-  ('Sales', 'New York', 500000.00),
-  ('Marketing', 'Los Angeles', 300000.00),
-  ('HR', 'Chicago', 200000.00);
-  -- 插入员工数据
+  (
+    'Engineering',
+    'San Francisco',
+    1000000.00
+  ),
+  (
+    'Sales',
+    'New York',
+    500000.00
+  ),
+  (
+    'Marketing',
+    'Los Angeles',
+    300000.00
+  ),
+  (
+    'HR',
+    'Chicago',
+    200000.00
+  );
+
+-- 插入员工数据
 INSERT INTO
   employees (
     first_name,
@@ -81,12 +107,14 @@ VALUES
     95000.00,
     1
   );
-  -- 查询所有员工
+
+-- 查询所有员工
 SELECT
   *
 FROM
   employees;
-  -- 查询特定部门的员工
+
+-- 查询特定部门的员工
 SELECT
   e.first_name,
   e.last_name,
@@ -100,7 +128,8 @@ WHERE
   d.name = 'Engineering'
 ORDER BY
   e.salary DESC;
-  -- 计算每个部门的平均工资
+
+-- 计算每个部门的平均工资
 SELECT
   d.name AS department,
   COUNT(e.id) AS employee_count,
@@ -117,7 +146,8 @@ HAVING
   COUNT(e.id) > 0
 ORDER BY
   avg_salary DESC;
-  -- 更新员工工资
+
+-- 更新员工工资
 UPDATE
   employees
 SET
@@ -125,12 +155,14 @@ SET
 WHERE
   department_id = 1
   AND hire_date < '2020-01-01';
-  -- 删除旧记录
+
+-- 删除旧记录
 DELETE FROM
   employees
 WHERE
   hire_date < '2015-01-01';
-  -- 创建视图
+
+-- 创建视图
 CREATE VIEW employee_summary AS
 SELECT
   e.id,
@@ -142,17 +174,21 @@ SELECT
 FROM
   employees e
   LEFT JOIN departments d ON e.department_id = d.id;
-  -- 查询视图
+
+-- 查询视图
 SELECT
   *
 FROM
   employee_summary
 WHERE
   years_employed > 2;
-  -- 创建索引
+
+-- 创建索引
 CREATE INDEX idx_employee_email ON employees(email);
+
 CREATE INDEX idx_employee_department ON employees(department_id);
-  -- 子查询示例
+
+-- 子查询示例
 SELECT
   first_name,
   last_name,
@@ -161,7 +197,8 @@ FROM
   employees
 WHERE
   salary > (SELECT AVG(salary) FROM employees);
-  -- CASE 语句
+
+-- CASE语句
 SELECT
   first_name,
   last_name,
@@ -169,13 +206,14 @@ SELECT
   CASE
     WHEN salary < 60000 THEN 'Junior'
     WHEN salary BETWEEN 60000
-    and 80000 THEN 'Mid-level'
+    AND 80000 THEN 'Mid-level'
     WHEN salary > 80000 THEN 'Senior'
     ELSE 'Unknown'
   END AS level
 FROM
   employees;
-  -- 窗口函数
+
+-- 窗口函数
 SELECT
   first_name,
   last_name,

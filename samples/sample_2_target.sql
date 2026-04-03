@@ -251,7 +251,7 @@ FROM
                     'reqnbr', reqnbr,
                     'trscod', trscod,
                     'vltdat', vltdat
-                  )AS right_data
+                  )right_data
                 FROM
                   payments.t_recon_zhaoshang_details
                 WHERE
@@ -338,7 +338,7 @@ FROM
                     'report_apr_type', t1.report_apr_type,
                     'really_apr', t1.really_apr,
                     'credit_no', t1.credit_no
-                  )AS left_data
+                  )left_data
                 FROM
                   (
                     SELECT
@@ -434,7 +434,7 @@ FROM
                     'loan_mode', t1.loan_mode,
                     'sub_payment_info', t1.sub_payment_info,
                     'self_support', t1.self_support
-                  )AS left_data
+                  )left_data
                 FROM
                   (
                     SELECT

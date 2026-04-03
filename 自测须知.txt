@@ -5,6 +5,8 @@
 complex_test.sql 格式化之后，内容要跟 complex_test_target.sql 完全一致
 sample_1.sql 格式化之后，内容要跟 sample_1_target.sql 完全一致
 sample_2.sql 格式化之后，内容要跟 sample_2_target.sql 完全一致
+sample_3.sql 格式化之后，内容要跟 sample_3_target.sql 完全一致
+sample_4.sql 格式化之后，内容要跟 sample_4_target.sql 完全一致
 
 注意：如果这三个“完全一致”的要求，本身就有冲突，那么请你在修改代码之前先问我，我来判断以谁为准
 然后请你以文字描述的形式，整理出当前的sql格式化规则，命名为 “sql_formatter.md”，放到 /sql_formatter 下面

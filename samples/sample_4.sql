@@ -41,7 +41,37 @@ FROM
               AND b.op_flag != 'DELETE'
             GROUP BY
               a.duebill_no
-          ) aa, ( SELECT a.duebill_no accduebill, sum(c.receivable_interest) sumacc FROM core_ms.t_duebill_info a INNER JOIN account_ms.c_accrual_detail c ON a.duebill_no = IF(c.duebill_no like '%-0%', LEFT (c.duebill_no, LENGTH(c.duebill_no) - 3), c.duebill_no) AND c.accrual_type != '4' WHERE ((a.clear_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH) AND a.clear_date < CURRENT_DATE() AND a.duebill_status = 3) OR (a.end_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH) AND a.end_date <= CURRENT_DATE() AND a.duebill_status != 3) ) AND a.op_flag != 'DELETE' AND c.op_flag != 'DELETE' GROUP BY a.duebill_no ) bb
+          ) aa,
+          (
+            SELECT
+              a.duebill_no accduebill,
+              sum(c.receivable_interest) sumacc
+            FROM
+              core_ms.t_duebill_info a
+              INNER JOIN account_ms.c_accrual_detail c ON a.duebill_no = IF(
+                c.duebill_no like '%-0%',
+                LEFT(c.duebill_no, LENGTH(c.duebill_no) - 3),
+                c.duebill_no
+              )
+              and c.accrual_type != '4'
+            WHERE
+              (
+                (
+                  a.clear_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH)
+                  and a.clear_date < CURRENT_DATE()
+                  and a.duebill_status = 3
+                )
+                or (
+                  a.end_date > DATE_ADD(CURRENT_DATE(), INTERVAL -2 MONTH)
+                  and a.end_date <= CURRENT_DATE()
+                  and a.duebill_status != 3
+                )
+              )
+              AND a.op_flag != 'DELETE'
+              AND c.op_flag != 'DELETE'
+            GROUP BY
+              a.duebill_no
+          ) bb
         WHERE
           aa.schduebill = bb.accduebill
           AND aa.sumsch != bb.sumacc
@@ -49,4 +79,13 @@ FROM
       INNER JOIN core_ms.t_duebill_info t ON d.schduebill = t.duebill_no
   ) f
 WHERE
-  NOT EXISTS(SELECT 1 FROM core_ms.t_buy_back_record e WHERE e.duebill_no = f.duebill_no AND e.gmt_create >= CURRENT_DATE AND e.business_status = 3);
+  NOT EXISTS (
+    SELECT
+      1
+    FROM
+      core_ms.t_buy_back_record e
+    WHERE
+      e.duebill_no = f.duebill_no
+      AND e.gmt_create >= CURRENT_DATE
+      AND e.business_status = 3
+  );
