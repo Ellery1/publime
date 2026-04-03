@@ -228,10 +228,10 @@ def format_in_clause(condition: str) -> str:
     
     # 查找IN子句 - 支持表名前缀（如t1.column）和NOT IN
     # 先尝试匹配 NOT IN
-    match = re.search(r'([\w.]+)\s+(not\s+in)\s*\((.*?)\)', condition, re.IGNORECASE | re.DOTALL)
+    match = re.search(r'([\w.]+)\s+(not\s+in)\s*\((.*)\)', condition, re.IGNORECASE | re.DOTALL)
     if not match:
         # 如果没有NOT IN，尝试匹配普通的IN
-        match = re.search(r'([\w.]+)\s+(in)\s*\((.*?)\)', condition, re.IGNORECASE | re.DOTALL)
+        match = re.search(r'([\w.]+)\s+(in)\s*\((.*)\)', condition, re.IGNORECASE | re.DOTALL)
     
     if not match:
         return condition
@@ -296,10 +296,9 @@ def format_in_clause(condition: str) -> str:
 
 def remove_space_before_paren(text: str) -> str:
     """
-    移除函数名和左括号之间的空格，以及左括号后的空格，以及右括号前的空格
-    但确保IN/NOT IN关键字后有空格（不区分大小写）
-    例如: DATE_FORMAT ( -> DATE_FORMAT(
-          DATE_FORMAT( -> DATE_FORMAT(
+    移除括号内侧的空格，但保留函数名与左括号之间的空格
+    确保IN/NOT IN关键字后有空格（不区分大小写）
+    例如: IFNULL ( col, 0 ) -> IFNULL (col, 0)  # 保留函数名后空格，移除括号内侧空格
           DATE_FORMAT( trsdat ) -> DATE_FORMAT(trsdat)
           IN (3) -> IN (3)  # 保留IN后的空格
           IN(3) -> IN (3)   # 添加IN后的空格
@@ -323,9 +322,11 @@ def remove_space_before_paren(text: str) -> str:
     text = re.sub(r'\b(IN|in|In|iN)\s+\(', r'\1<<<SPACE>>>(', text)
     text = re.sub(r'\b(NOT\s+IN|not\s+in|Not\s+In|NOT\s+in|not\s+IN)\s+\(', r'\1<<<SPACE>>>(', text, flags=re.IGNORECASE)
     
-    # 第三步：移除其他函数名后的空格
-    # 匹配函数名（字母、数字、下划线）后跟空格和左括号
-    text = re.sub(r'(\w+)\s+\(', r'\1(', text)
+    # 第三步：移除SQL关键字（如LEFT、RIGHT）作为函数使用时与括号间的空格
+    # 这些关键字在formatters.py的关键字处理中会被加上前后空格，
+    # 当它们作为函数使用时（如LEFT(str, n)），需要移除多余空格
+    sql_keywords_as_functions = r'(?i)\b(LEFT|RIGHT|TRIM|REPLACE|SUBSTRING|SUBSTR|CONVERT|CAST|NULLIF|GREATEST|LEAST)\s+\('
+    text = re.sub(sql_keywords_as_functions, lambda m: m.group(1).upper() + '(', text)
     # 匹配左括号后的空格
     text = re.sub(r'\(\s+', '(', text)
     # 匹配右括号前的空格

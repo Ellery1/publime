@@ -1,125 +1,311 @@
 SELECT
-  count(0)
+  tct.collection_task_no,
+  tct.collection_type,
+  tct.customer_no,
+  tct.product_no,
+  tct.parallel_type,
+  tct.group_code,
+  tct.group_name,
+  if (tct.loan_status = 'SETTLE', '是', '否') as loanStatus,
+  tct.gmt_update,
+  xc.`NAME` AS product_name,
+  uc.id_number,
+  uc.customer_name,
+  ua.province,
+  ua.city,
+  ua.district,
+  IFNULL (overdueInfo.sch_tot_amount, 0) as sch_tot_amount,
+  IFNULL (overdueInfo.sch_principal, 0) as sch_principal,
+  IFNULL (overdueInfo.sch_interest, 0) as sch_interest,
+  IFNULL (overdueInfo.os_tot_amount, 0) as os_tot_amount,
+  IFNULL (overdueInfo.os_other_fee, 0) as os_other_fee,
+  IFNULL (overdueInfo.os_overdue_interest, 0) as os_overdue_interest,
+  IFNULL (overdueInfo.os_principal, 0) as os_principal,
+  IFNULL (overdueInfo.os_interest, 0) as os_interest,
+  IFNULL (overdueInfo.overdue_day, 0) as overdue_day,
+  IFNULL (total.total_amount, 0) as total_amount,
+  IFNULL (otherFeeDetail.osAmount, 0) as os_amount,
+  tct.lawsuit,
+  tct.lawsuit_reason,
+  tct.last_record_name,
+  tct.last_record_time,
+  tct.bind_code,
+  tct.bind_name,
+  tct.complanint,
+  tct.mark,
+  DATE_FORMAT (tct.mark_time, '%Y-%m-%d') as markTime,
+  tllr.send_status as lawyerLetterStatus,
+  rr.related_name as relatedName,
+  COALESCE (apb2.platform_name, apb1.platform_name) as firstLevelCoreCustomer
 FROM
   (
     SELECT
-      tdi.product_no AS productNo,
-      -- 产品编号
-      xc.NAME AS productName,
-      -- 产品名称
-      tdi.application_no AS applicationNo,
-      -- 授信协议号
-      tdi.customer_no AS customerNo,
-      -- 客户编号
-      uc.customer_name AS customerName,
-      -- 客户名称
-      tdi.order_no AS orderNo,
-      -- 订单号
-      tdi.duebill_no AS duebillNo,
-      -- 贷款借据号
-      tdi.contract_no AS contractNo,
-      -- 贷款合同编号
-      tdi.repay_mode as repayMode,
-      -- 还款方式
-      trs.sch_date AS schDate,
-      -- 最近还款日
-      sum(trs.os_tot_amount) AS payableTotalAmount,
-      -- 应还总金额
-      if(trs.setl_flag = 1, '是', '否') as setlFlag,
-      -- 是否已还 1是，0否
-      rvt.id as taskId,
-      if(
-        rvt.return_visit = 1,
-        '是',
-        if(rvt.return_visit = 0, '否', '-')
-      ) as visited,
-      rvt.task_status as taskStatus,
-      -- 任务状态
-      rvt.bind_name as ownerName,
-      -- 任务所属者
-      rvt.rule_name as ruleName,
-      rvt.gmt_create as createTime,
-      rvr.visit_task_no,
-      rvr.gmt_create as lastRecodTime,
-      rvr.created_by as lastTaskHolder,
-      oca.funder_name as funder,
-      tdi.loan_mode as loanMode,
-      oca.phone
+      tct.collection_task_no,
+      tct.collection_type,
+      tct.customer_no,
+      tct.customer_name,
+      tct.product_no,
+      tct.parallel_type,
+      tct.loan_status,
+      tct.group_code,
+      tct.group_name,
+      max (tct.application_no) as application_no,
+      group_concat (tct.duebill_no) as duebill_no,
+      max (tct.collection_status) as collection_status,
+      max (tct.gmt_update) as gmt_update,
+      max (tct.lawsuit) as lawsuit,
+      max (tct.lawsuit_reason) as lawsuit_reason,
+      max (tct.last_record_name) as last_record_name,
+      max (tct.last_record_time) as last_record_time,
+      max (tct.bind_code) as bind_code,
+      max (tct.bind_name) as bind_name,
+      max (tct.complanint) as complanint,
+      max (tct.case_keep) as case_keep,
+      max (tct.mark) as mark,
+      max (tct.mark_time) as mark_time
     FROM
-      post_loan.t_return_visit_task rvt
-      LEFT JOIN post_loan.t_blacklist tb ON rvt.customer_no = tb.customer_no
-      and tb.op_flag != 'DELETE'
-      and tb.scene like '%REPAYMENT_REMINDER%'
-      and tb.deleted = 0
-      LEFT JOIN core_ms.t_repayment_schedule trs ON rvt.duebill_no = trs.duebill_no
-      INNER JOIN core_ms.`t_duebill_info` tdi ON rvt.duebill_no = tdi.duebill_no
-      INNER JOIN xyd_config.t_product xc ON xc.product_no = tdi.product_no
-      INNER JOIN titan.u_customer uc ON uc.customer_no = tdi.customer_no
-      LEFT JOIN titan.o_credit_application oca ON rvt.application_no = oca.application_no
-      and oca.op_flag != 'DELETE'
-      LEFT JOIN (
+      post_loan.t_collection_task tct
+    WHERE
+      tct.deleted = 0
+      AND tct.op_flag != 'DELETE'
+    GROUP BY
+      tct.collection_task_no,
+      tct.collection_type,
+      tct.customer_no,
+      tct.customer_name,
+      tct.product_no,
+      tct.parallel_type,
+      tct.loan_status,
+      tct.group_code,
+      tct.group_name
+  ) tct
+  LEFT JOIN titan.u_address ua ON tct.customer_no = ua.customer_no
+  and ua.addr_type = 'residential'
+  and ua.op_flag != 'DELETE'
+  LEFT JOIN (
+    SELECT
+      submit_param,
+      customer_no,
+      collection_task_no
+    FROM
+      post_loan.t_collection_task_customer_label
+    WHERE
+      id IN (SELECT MAX (id) FROM post_loan.t_collection_task_customer_label WHERE op_flag != 'DELETE' GROUP BY customer_no, collection_task_no)
+  ) ctcl ON ctcl.collection_task_no = tct.collection_task_no
+  and ctcl.customer_no = tct.customer_no
+  LEFT JOIN titan.o_credit_application oca ON oca.application_no = tct.application_no
+  and oca.op_flag != 'DELETE'
+  LEFT JOIN titan.u_customer uc ON tct.customer_no = uc.customer_no
+  and uc.op_flag != 'DELETE'
+  LEFT JOIN xyd_config.t_product xc ON tct.product_no = xc.product_no
+  and xc.op_flag != 'DELETE'
+  LEFT JOIN (
+    SELECT
+      distinct tlt.collection_task_no,
+      tlt.customer_no,
+      tlt.application_no,
+      tlt.lawsuit_status
+    FROM
+      post_loan.t_lawsuit_task tlt
+    WHERE
+      tlt.op_flag != 'DELETE'
+  ) tlt ON tlt.collection_task_no = tct.collection_task_no
+  and tlt.customer_no = tct.customer_no
+  and tlt.application_no = tct.application_no
+  LEFT JOIN titan.u_account_business uab ON uab.apply_no = tct.application_no
+  and uab.op_flag != 'DELETE'
+  LEFT JOIN (
+    SELECT
+      tdi.product_no,
+      tdi.customer_no,
+      sum (trsAll.os_tot_amount) AS sch_tot_amount,
+      sum (trsAll.os_principal) AS sch_principal,
+      sum (trsAll.os_interest) AS sch_interest,
+      sum (trsOverdue.os_tot_amount) AS os_tot_amount,
+      sum (trsOverdue.os_other_fee) AS os_other_fee,
+      sum (trsOverdue.os_overdue_interest) AS os_overdue_interest,
+      sum (trsOverdue.os_principal) AS os_principal,
+      sum (trsOverdue.os_interest) AS os_interest,
+      max (trsOverdue.overdue_day) AS overdue_day
+    FROM
+      core_ms.`t_duebill_info` tdi
+      INNER JOIN (
         SELECT
-          visit_task_no,
-          gmt_create,
-          created_by,
-          op_flag
+          duebill_no,
+          sum (os_tot_amount) AS os_tot_amount,
+          sum (os_other_fee) AS os_other_fee,
+          sum (os_overdue_interest) AS os_overdue_interest,
+          sum (os_principal) AS os_principal,
+          sum (os_interest) AS os_interest,
+          max (overdue_day) AS overdue_day
         FROM
-          (
-            SELECT
-              row_number () OVER(
-                PARTITION BY contract_no
-                ORDER BY
-                  gmt_update DESC
-              ) AS row_num,
-              visit_task_no,
-              gmt_create,
-              created_by,
-              op_flag
-            FROM
-              post_loan.t_return_visit_record
-          ) t
+          core_ms.t_repayment_schedule
         WHERE
-          t.row_num = 1
-      ) AS rvr ON rvr.visit_task_no = rvt.visit_task_no
-      and rvt.op_flag != 'DELETE'
+          op_flag != 'DELETE'
+          AND overdue_flag = '1'
+          AND setl_flag = 0
+        GROUP BY
+          duebill_no
+      ) trsOverdue ON trsOverdue.duebill_no = tdi.duebill_no
+      INNER JOIN (
+        SELECT
+          duebill_no,
+          sum (os_principal) AS os_principal,
+          sum (os_tot_amount) AS os_tot_amount,
+          sum (os_interest) AS os_interest
+        FROM
+          core_ms.t_repayment_schedule
+        WHERE
+          op_flag != 'DELETE'
+          AND setl_flag = 0
+        GROUP BY
+          duebill_no
+      ) trsAll ON trsAll.duebill_no = trsOverdue.duebill_no
     WHERE
       tdi.op_flag != 'DELETE'
-      AND rvt.op_flag != 'DELETE'
-      AND rvt.return_visit_type = 'REPAYMENT_REMINDER'
-      AND uc.op_flag != 'DELETE'
-      AND xc.op_flag != 'DELETE'
-      AND trs.overdue_flag = 0
-      AND trs.setl_flag = 0
-      AND tb.id is null
-      -- 还款日
-      -- 客户名称
-      -- 还款日是否首三期
-      -- 当期还款总额
     GROUP BY
       tdi.product_no,
-      xc.`NAME`,
-      tdi.application_no,
+      tdi.customer_no
+  ) overdueInfo ON tct.customer_no = overdueInfo.customer_no
+  and overdueInfo.product_no = tct.product_no
+  LEFT JOIN (
+    SELECT
       tdi.customer_no,
-      uc.customer_name,
-      tdi.order_no,
-      tdi.duebill_no,
-      tdi.contract_no,
-      trs.sch_date,
-      trs.setl_flag,
-      rvt.id,
-      rvt.return_visit,
-      rvt.task_status,
-      rvt.bind_name,
-      rvt.rule_name,
-      rvt.gmt_create,
-      tdi.repay_mode,
-      rvr.visit_task_no,
-      rvr.gmt_create,
-      rvr.created_by,
-      oca.funder_name,
-      tdi.loan_mode,
-      oca.phone
-    ORDER BY
-      rvt.task_status,
-      tdi.duebill_no
-  ) tmp_count
+      tdi.product_no,
+      sum (tfd.os_amount) osAmount
+    FROM
+      core_ms.t_other_fee_detail tfd
+      INNER JOIN core_ms.t_duebill_info tdi ON tfd.duebill_no = tdi.duebill_no
+      and tfd.charge_id = 12
+    WHERE
+      tdi.op_flag != 'DELETE'
+      AND tfd.op_flag != 'DELETE'
+    GROUP BY
+      tdi.customer_no,
+      tdi.product_no
+  ) otherFeeDetail ON tct.customer_no = otherFeeDetail.customer_no
+  and tct.product_no = otherFeeDetail.product_no
+  LEFT JOIN (
+    SELECT
+      tllr.collection_task_no,
+      tllr.send_status
+    FROM
+      post_loan.t_lawyer_letter_record tllr
+      JOIN (
+        SELECT
+          collection_task_no,
+          max (id) id
+        FROM
+          post_loan.t_lawyer_letter_record
+        WHERE
+          collection_task_no IS NOT NULL
+          AND op_flag != 'DELETE'
+        GROUP BY
+          collection_task_no
+      ) temp ON temp.id = tllr.id
+  ) tllr ON tllr.collection_task_no = tct.collection_task_no
+  LEFT JOIN (
+    SELECT
+      tdi.customer_no,
+      SUM (trr.repay_amount) as total_amount
+    FROM
+      core_ms.t_duebill_info tdi
+      JOIN core_ms.t_repay_record trr ON tdi.duebill_no = trr.duebill_no
+    WHERE
+      (
+        tdi.op_flag != 'DELETE'
+        or tdi.op_flag IS NULL
+      )
+      AND (
+        trr.op_flag != 'DELETE'
+        or trr.op_flag IS NULL
+      )
+      AND trr.transaction_date = CURRENT_DATE ()
+    GROUP BY
+      tdi.customer_no
+  ) total ON total.customer_no = tct.customer_no
+  LEFT JOIN (
+    SELECT
+      sc.collection_task_no,
+      t.riskGrade,
+      sc.tag_loss,
+      sc.tag_inertia_ovdue,
+      sc.tag_fpd2,
+      sc.tag_fpd15_his3m,
+      sc.tag_fpd2_first
+    FROM
+      post_loan.t_collection_score_card sc
+      JOIN (
+        SELECT
+          collection_task_no,
+          max (risk_grade) riskGrade,
+          max (id) id
+        FROM
+          post_loan.t_collection_score_card
+        WHERE
+          deleted = 0
+          AND op_flag != 'DELETE'
+          AND risk_grade != 9
+        GROUP BY
+          collection_task_no
+      ) t ON t.id = sc.id
+    WHERE
+      sc.deleted = 0
+      AND sc.op_flag != 'DELETE'
+      AND sc.risk_grade != 9
+  ) scoreCard ON tct.collection_task_no = scoreCard.collection_task_no
+  LEFT JOIN (
+    SELECT
+      customer_no,
+      related_name,
+      outer_no
+    FROM
+      titan.r_related
+    WHERE
+      (
+        op_flag != 'DELETE'
+        or op_flag IS NULL
+      )
+    GROUP BY
+      customer_no,
+      related_name,
+      outer_no
+  ) rr ON rr.customer_no = oca.related_no
+  LEFT JOIN (
+    SELECT
+      platform_basic_no,
+      upper_platform_no,
+      platform_name
+    FROM
+      xyd_companion.admin_platform_basic
+    WHERE
+      (
+        op_flag != 'DELETE'
+        or op_flag is null
+      )
+  ) apb1 ON rr.outer_no = apb1.platform_basic_no
+  LEFT JOIN (
+    SELECT
+      platform_basic_no,
+      upper_platform_no,
+      platform_name
+    FROM
+      xyd_companion.admin_platform_basic
+    WHERE
+      (
+        op_flag != 'DELETE'
+        or op_flag is null
+      )
+  ) apb2 ON apb1.upper_platform_no = apb2.platform_basic_no
+WHERE
+  true
+  AND tct.collection_type in ('OPERATE', 'OPERATE_OUTSOURE', 'OPERATE_LAWSUIT', 'OPERATE_OUTSOURE_LAWSUIT')
+  AND tct.duebill_no like concat ('%', 'LN20240614020816612915', '%')
+  AND tct.loan_status = 'OVERDUE'
+ORDER BY
+  tct.last_record_time DESC,
+  tct.gmt_update DESC,
+  tct.customer_no,
+  tct.collection_task_no
+LIMIT
+  50

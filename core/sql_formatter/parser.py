@@ -159,10 +159,12 @@ def split_statements(text: str) -> List[str]:
                     remaining = current[j:].upper()
                     
                     # 检查是否是另一个 SQL 语句的开始（只在深度为0时）
-                    if remaining.startswith('SELECT ') or remaining.startswith('CREATE ') or \
+                    # 同时确保关键字前面不是标识符字符（防止误匹配如gmt_create中的create）
+                    prev_char_ok = (j == 0 or not (current[j-1].isalnum() or current[j-1] == '_'))
+                    if prev_char_ok and (remaining.startswith('SELECT ') or remaining.startswith('CREATE ') or \
                        remaining.startswith('UPDATE ') or remaining.startswith('DELETE ') or \
                        remaining.startswith('INSERT ') or remaining.startswith('WITH ') or \
-                       remaining.startswith('USE '):
+                       remaining.startswith('USE ')):
                         # 确保不是第一个关键字
                         if i > 0:
                             positions.append((i, remaining.split()[0]))

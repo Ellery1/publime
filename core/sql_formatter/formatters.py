@@ -587,7 +587,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                 continue
             
             # 检查列中是否包含窗口函数 OVER(...)
-            if 'OVER' in col.upper() and '(' in col:
+            if re.search(r'\bOVER\s*\(', col, re.IGNORECASE):
                 formatted_col = format_window_function(col, indent_level=0)
                 # 如果是多行,需要特殊处理
                 if '\n' in formatted_col:
@@ -604,7 +604,7 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                     else:
                         result_lines.append(base_indent + f'  {formatted_col}')
             # 检查列中是否包含CASE表达式
-            elif 'CASE' in col.upper():
+            elif re.search(r'\bCASE\b', col, re.IGNORECASE):
                 # 格式化CASE表达式
                 formatted_case = format_case_expression(col, indent_level=indent_level + 1)
                 if i < len(cols) - 1:
@@ -645,7 +645,8 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                     else:
                         result_lines.append(base_indent + f'  {formatted_if}')
             else:
-                # 普通列，移除函数括号前后的空格
+                # 普通列，先处理运算符空格，再移除函数括号前后的空格
+                col = add_space_around_equals(col)
                 col = remove_space_before_paren(col)
                 # 对包含IF函数的列，在IF参数内部添加等号空格
                 if re.search(r'\bif\s*\(', col, re.IGNORECASE):
