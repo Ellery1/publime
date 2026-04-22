@@ -390,6 +390,177 @@ def _add_space_in_if_params(col: str) -> str:
     return before + inside + after
 
 
+def _format_cast_substring_if(col: str, base_indent: str) -> str:
+    """
+    格式化 CAST(SUBSTRING(if(...), ...) AS type) % expr AS alias 这种深层嵌套。
+    
+    目标输出格式:
+    CAST (
+      SUBSTRING (
+        if (
+          param1,
+          param2,
+          param3
+        ),
+        17,
+        1
+      ) AS UNSIGNED
+    ) % 2 AS lastGender
+    """
+    col_stripped = col.strip()
+    
+    # 找到CAST的左括号
+    cast_match = re.search(r'(?i)\bCAST\s*\(', col_stripped)
+    if not cast_match:
+        return base_indent + col_stripped
+    
+    cast_paren_start = col_stripped.find('(', cast_match.start())
+    
+    # 找到CAST的匹配右括号
+    depth = 1
+    j = cast_paren_start + 1
+    while j < len(col_stripped) and depth > 0:
+        if col_stripped[j] == '(':
+            depth += 1
+        elif col_stripped[j] == ')':
+            depth -= 1
+        j += 1
+    cast_paren_end = j - 1  # 指向 )
+    
+    # CAST括号内的内容
+    cast_inner = col_stripped[cast_paren_start + 1:cast_paren_end].strip()
+    # CAST括号后的内容（如 % 2 AS lastGender）
+    after_cast = col_stripped[cast_paren_end + 1:].strip()
+    
+    # 在cast_inner中找到SUBSTRING
+    sub_match = re.search(r'(?i)\bSUBSTRING\s*\(', cast_inner)
+    if not sub_match:
+        return base_indent + col_stripped
+    
+    sub_paren_start = cast_inner.find('(', sub_match.start())
+    
+    # 找到SUBSTRING的匹配右括号
+    depth = 1
+    j = sub_paren_start + 1
+    while j < len(cast_inner) and depth > 0:
+        if cast_inner[j] == '(':
+            depth += 1
+        elif cast_inner[j] == ')':
+            depth -= 1
+        j += 1
+    sub_paren_end = j - 1  # 指向 )
+    
+    # SUBSTRING括号内的内容
+    sub_inner = cast_inner[sub_paren_start + 1:sub_paren_end].strip()
+    # SUBSTRING括号后的内容（如 AS UNSIGNED）
+    after_sub = cast_inner[sub_paren_end + 1:].strip()
+    
+    # 在sub_inner中分割参数（考虑括号深度）
+    sub_params = []
+    current = ''
+    depth = 0
+    for ch in sub_inner:
+        if ch == '(':
+            depth += 1
+            current += ch
+        elif ch == ')':
+            depth -= 1
+            current += ch
+        elif ch == ',' and depth == 0:
+            sub_params.append(current.strip())
+            current = ''
+        else:
+            current += ch
+    if current.strip():
+        sub_params.append(current.strip())
+    
+    # 第一个参数应该是if(...)
+    if not sub_params:
+        return base_indent + col_stripped
+    
+    first_param = sub_params[0]
+    
+    # 检查第一个参数是否包含if函数
+    if_match_inner = re.search(r'(?i)\bif\s*\(', first_param)
+    if not if_match_inner:
+        return base_indent + col_stripped
+    
+    # 格式化if函数参数
+    if_paren_start = first_param.find('(', if_match_inner.start())
+    depth = 1
+    j = if_paren_start + 1
+    while j < len(first_param) and depth > 0:
+        if first_param[j] == '(':
+            depth += 1
+        elif first_param[j] == ')':
+            depth -= 1
+        j += 1
+    if_paren_end = j - 1
+    
+    if_inner = first_param[if_paren_start + 1:if_paren_end].strip()
+    original_if = first_param[if_match_inner.start():if_match_inner.end()].rstrip('(').rstrip()
+    
+    # 分割if参数
+    if_params = []
+    current = ''
+    depth = 0
+    for ch in if_inner:
+        if ch == '(':
+            depth += 1
+            current += ch
+        elif ch == ')':
+            depth -= 1
+            current += ch
+        elif ch == ',' and depth == 0:
+            if_params.append(current.strip())
+            current = ''
+        else:
+            current += ch
+    if current.strip():
+        if_params.append(current.strip())
+    
+    # 对if参数添加等号空格
+    formatted_if_params = [add_space_around_equals(p) for p in if_params]
+    
+    # 构建输出
+    indent1 = base_indent          # CAST 级别
+    indent2 = base_indent + '  '   # SUBSTRING 级别
+    indent3 = base_indent + '    ' # if 级别
+    indent4 = base_indent + '      ' # if 参数级别
+    
+    lines = []
+    lines.append(indent1 + 'CAST (')
+    lines.append(indent2 + 'SUBSTRING (')
+    lines.append(indent3 + original_if + ' (')
+    for k, param in enumerate(formatted_if_params):
+        if k < len(formatted_if_params) - 1:
+            lines.append(indent4 + param + ',')
+        else:
+            lines.append(indent4 + param)
+    lines.append(indent3 + '),')
+    
+    # 添加SUBSTRING的其余参数
+    for k, param in enumerate(sub_params[1:]):
+        if k < len(sub_params) - 2:
+            lines.append(indent3 + param.strip() + ',')
+        else:
+            lines.append(indent3 + param.strip())
+    
+    # 关闭SUBSTRING，加上AS type
+    if after_sub:
+        lines.append(indent2 + ') ' + after_sub)
+    else:
+        lines.append(indent2 + ')')
+    
+    # 关闭CAST，加上后缀
+    if after_cast:
+        lines.append(indent1 + ') ' + after_cast)
+    else:
+        lines.append(indent1 + ')')
+    
+    return '\n'.join(lines)
+
+
 def format_select(statement: str, indent_level: int = 0) -> str:
     """
     格式化 SELECT 语句
@@ -605,12 +776,104 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                         result_lines.append(base_indent + f'  {formatted_col}')
             # 检查列中是否包含CASE表达式
             elif re.search(r'\bCASE\b', col, re.IGNORECASE):
-                # 格式化CASE表达式
-                formatted_case = format_case_expression(col, indent_level=indent_level + 1)
-                if i < len(cols) - 1:
-                    result_lines.append(formatted_case.rstrip() + ',')
+                # 检查是否被聚合函数包裹：SUM(CASE...), COUNT(DISTINCT(CASE...)), etc.
+                agg_case_match = re.match(
+                    r'(?i)(SUM|COUNT|AVG|MAX|MIN)\s*\(\s*(DISTINCT\s*\(\s*)?',
+                    col.strip()
+                )
+                if agg_case_match:
+                    # 聚合函数包裹CASE的情况
+                    col_stripped = col.strip()
+                    agg_func = agg_case_match.group(1).upper()
+                    has_distinct = agg_case_match.group(2) is not None
+                    prefix_end = agg_case_match.end()
+                    
+                    # 从prefix_end开始找到CASE表达式和END，然后提取后缀
+                    # 找到CASE...END的范围
+                    case_start = col_stripped.upper().find('CASE', prefix_end - 1)
+                    if case_start == -1:
+                        case_start = prefix_end
+                    
+                    # 找到匹配的END
+                    depth = 0
+                    end_pos = case_start
+                    j = case_start
+                    in_string = False
+                    string_char = ''
+                    while j < len(col_stripped):
+                        ch = col_stripped[j]
+                        if ch in ("'", '"'):
+                            if not in_string:
+                                in_string = True
+                                string_char = ch
+                            elif ch == string_char:
+                                in_string = False
+                        elif not in_string:
+                            if col_stripped[j:j+4].upper() == 'CASE' and (j == 0 or not col_stripped[j-1].isalnum()):
+                                depth += 1
+                            elif col_stripped[j:j+3].upper() == 'END' and (j + 3 >= len(col_stripped) or not col_stripped[j+3].isalnum()):
+                                depth -= 1
+                                if depth == 0:
+                                    end_pos = j + 3
+                                    break
+                        j += 1
+                    
+                    # 提取CASE表达式（从CASE到END）
+                    case_expr = col_stripped[case_start:end_pos].strip()
+                    
+                    # 提取END之后的部分（关闭括号、AS别名等）
+                    after_end = col_stripped[end_pos:].strip()
+                    
+                    # 解析after_end：期望 ) 或 )) 然后 AS alias
+                    # 对于 SUM(CASE...END)：after_end = ") AS alias"
+                    # 对于 COUNT(DISTINCT(CASE...END))：after_end = ")) AS alias"
+                    as_match = re.search(r'(?i)\)\s*(?:\)\s*)?(?:\s+AS\s+\w+)?$', after_end)
+                    
+                    # 提取AS子句
+                    as_clause = ''
+                    as_search = re.search(r'(?i)\s+AS\s+\w+', after_end)
+                    if as_search:
+                        as_clause = ' ' + ' '.join(as_search.group(0).split())
+                    
+                    # 格式化内部CASE表达式
+                    if has_distinct:
+                        inner_indent = indent_level + 3  # agg > DISTINCT > CASE
+                    else:
+                        inner_indent = indent_level + 2  # agg > CASE
+                    
+                    formatted_inner_case = format_case_expression(case_expr, indent_level=inner_indent)
+                    
+                    # 组装结果
+                    col_indent = base_indent + '  '
+                    case_lines = []
+                    
+                    if has_distinct:
+                        case_lines.append(col_indent + agg_func + ' (')
+                        case_lines.append(col_indent + '  ' + 'DISTINCT (')
+                        # 添加格式化的CASE
+                        for line in formatted_inner_case.split('\n'):
+                            case_lines.append(line)
+                        case_lines.append(col_indent + '  ' + ')')
+                        case_lines.append(col_indent + ')' + as_clause)
+                    else:
+                        case_lines.append(col_indent + agg_func + ' (')
+                        # 添加格式化的CASE
+                        for line in formatted_inner_case.split('\n'):
+                            case_lines.append(line)
+                        case_lines.append(col_indent + ')' + as_clause)
+                    
+                    formatted_agg_case = '\n'.join(case_lines)
+                    if i < len(cols) - 1:
+                        result_lines.append(formatted_agg_case.rstrip() + ',')
+                    else:
+                        result_lines.append(formatted_agg_case)
                 else:
-                    result_lines.append(formatted_case)
+                    # 普通CASE表达式（不在聚合函数内）
+                    formatted_case = format_case_expression(col, indent_level=indent_level + 1)
+                    if i < len(cols) - 1:
+                        result_lines.append(formatted_case.rstrip() + ',')
+                    else:
+                        result_lines.append(formatted_case)
             # 检查列中是否包含JSON_OBJECT
             elif 'JSON_OBJECT' in col.upper():
                 formatted_col = format_json_object(col, indent_level=indent_level + 1)
@@ -628,6 +891,21 @@ def format_select(statement: str, indent_level: int = 0) -> str:
                         result_lines.append(base_indent + f'  {col},')
                     else:
                         result_lines.append(base_indent + f'  {col}')
+            # 检查列中是否包含CAST(SUBSTRING(if(...)))深层嵌套
+            elif re.search(r'(?i)\bCAST\s*\(.*\bSUBSTRING\s*\(.*\bif\s*\(', col):
+                formatted_nested = _format_cast_substring_if(col, base_indent + '  ')
+                if '\n' in formatted_nested:
+                    nested_lines = formatted_nested.split('\n')
+                    if i < len(cols) - 1:
+                        nested_lines[-1] += ','
+                    for line in nested_lines:
+                        result_lines.append(line)
+                else:
+                    formatted_nested = remove_space_before_paren(formatted_nested)
+                    if i < len(cols) - 1:
+                        result_lines.append(base_indent + f'  {formatted_nested},')
+                    else:
+                        result_lines.append(base_indent + f'  {formatted_nested}')
             # 检查列中是否包含IF函数（嵌套括号>=2表示复杂IF）
             elif re.search(r'\bif\s*\(', col, re.IGNORECASE) and col.count('(') >= 2:
                 from .expression_formatters import format_if_function
@@ -792,19 +1070,40 @@ def format_select(statement: str, indent_level: int = 0) -> str:
             cond = remove_space_before_paren(cond)
             # 确保等号周围有空格
             cond = add_space_around_equals(cond)
-            # 格式化IN子句
-            cond = format_in_clause(cond)
+            # 格式化IN子句中的复杂子查询（包含嵌套SELECT的子查询）
+            in_subquery_expanded = False
+            if re.search(r'(?i)\b(?:NOT\s+)?IN\s*\(', cond) and 'SELECT' in cond.upper():
+                # 只展开包含嵌套子查询的复杂IN子查询（多个SELECT）
+                select_count = len(re.findall(r'(?i)\bSELECT\b', cond))
+                if select_count >= 2:
+                    from .expression_formatters import format_in_subquery
+                    cond = format_in_subquery(cond, indent_level=indent_level + 1)
+                    if '\n' in cond:
+                        in_subquery_expanded = True
+            # 格式化IN子句（值列表）
+            if not in_subquery_expanded:
+                cond = format_in_clause(cond)
             
             # 如果条件包含换行（如格式化后的IN子句），需要特殊处理
             if '\n' in cond:
                 cond_lines = cond.split('\n')
-                if i == 0:
-                    result_lines.append(base_indent + '  ' + cond_lines[0])
+                if in_subquery_expanded:
+                    # IN子查询已经包含正确的绝对缩进，只需添加第一行的前缀
+                    if i == 0:
+                        result_lines.append(base_indent + '  ' + cond_lines[0])
+                    else:
+                        result_lines.append(base_indent + '  AND ' + cond_lines[0])
+                    # 其余行已有正确缩进，直接添加
+                    for line in cond_lines[1:]:
+                        result_lines.append(line)
                 else:
-                    result_lines.append(base_indent + '  AND ' + cond_lines[0])
-                # 其余行保持原有缩进
-                for line in cond_lines[1:]:
-                    result_lines.append(base_indent + '  ' + line)
+                    if i == 0:
+                        result_lines.append(base_indent + '  ' + cond_lines[0])
+                    else:
+                        result_lines.append(base_indent + '  AND ' + cond_lines[0])
+                    # 其余行保持原有缩进
+                    for line in cond_lines[1:]:
+                        result_lines.append(base_indent + '  ' + line)
                 # 如果有行内注释，添加到最后
                 if inline_comments:
                     for ic in inline_comments:

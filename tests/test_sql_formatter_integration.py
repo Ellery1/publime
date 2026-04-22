@@ -59,7 +59,7 @@ class TestSample6Integration:
 
     def test_sample_6_matches_target(self):
         sql = read_file(os.path.join(SAMPLES_DIR, "sample_6.sql"))
-        expected = read_file(os.path.join(SAMPLES_DIR, "sample_6_target.sql"))
+        expected = read_file(os.path.join(SAMPLES_DIR, "sample_target_6.sql"))
         actual = format_sql(sql)
 
         diffs = get_diff_lines(actual, expected)
