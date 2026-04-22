@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         
         # 格式化菜单 - 自动检测语言
-        format_action = QAction("格式化(&F)", self)
+        format_action = QAction("格式化 SQL/JSON/Doris日志(&F)", self)
         format_action.setShortcut(QKeySequence("Ctrl+Alt+F"))
         format_action.triggered.connect(self.format_code)
         edit_menu.addAction(format_action)
@@ -666,41 +666,60 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"自动换行: {'开启' if enabled else '关闭'}", 2000)
     
     def format_code(self):
-        """自动检测语言并格式化代码"""
+        """基于文本内容自动识别类型并格式化代码"""
         editor = self.tab_widget.get_current_editor()
         if not editor:
             return
-        
-        # 获取当前文件的语言
-        file_path = editor.get_file_path()
-        language = None
-        
-        if file_path:
-            # 通过文件扩展名检测语言
-            language = self.language_detector.detect_language(file_path)
-        else:
-            # 如果没有文件路径，尝试通过内容检测
-            text = editor.toPlainText().strip()
-            if text:
-                # 尝试解析为 JSON
-                try:
-                    import json
-                    json.loads(text)
-                    language = "json"
-                except:
-                    # 检查是否包含 SQL 关键字
-                    sql_keywords = ['SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'TABLE']
-                    text_upper = text.upper()
-                    if any(keyword in text_upper for keyword in sql_keywords):
-                        language = "sql"
-        
-        # 根据语言执行格式化
-        if language and language.lower() == "json":
+
+        text = editor.toPlainText().strip()
+        if not text:
+            return
+
+        # 优先级1: doris 日志（包含 Preparing: 或 执行sql:）
+        if 'Preparing:' in text or '执行sql:' in text:
+            self.format_doris_log()
+            return
+
+        # 优先级2: JSON（以 { 或 [ 开头）
+        if text.startswith('{') or text.startswith('['):
             self.format_json()
-        elif language and language.lower() == "sql":
+            return
+
+        # 优先级3: SQL（以 SQL 关键字开头，不区分大小写）
+        sql_keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'WITH']
+        text_upper = text.upper().lstrip()
+        if any(text_upper.startswith(kw) for kw in sql_keywords):
             self.format_sql()
+            return
+
+        # 无法识别
+        self.statusBar().showMessage(
+            "无法识别当前内容的格式类型，不是 sql、json 或者 doris 日志 的任何一种，请检查输入是否正确",
+            5000
+        )
+
+    def format_doris_log(self):
+        """处理 doris 日志，生成格式化后的 SQL"""
+        editor = self.tab_widget.get_current_editor()
+        if not editor:
+            return
+
+        from core.doris_log_processor import process_doris_log
+        text = editor.toPlainText()
+        success, result = process_doris_log(text)
+
+        if success:
+            cursor = editor.textCursor()
+            cursor.beginEditBlock()
+            try:
+                cursor.select(cursor.SelectionType.Document)
+                cursor.insertText(result)
+            finally:
+                cursor.endEditBlock()
+            self.statusBar().showMessage("Doris 日志转 SQL 格式化成功", 2000)
         else:
-            self.statusBar().showMessage("当前文件不是 JSON 或 SQL 格式，无需格式化", 3000)
+            self.statusBar().showMessage(f"Doris 日志处理失败: {result}", 5000)
+
     
     def format_json(self):
         """格式化 JSON"""
