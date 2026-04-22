@@ -67,7 +67,7 @@ def format_in_subquery(condition: str, indent_level: int) -> str:
         
         # 格式化子查询
         from .formatters import format_select
-        # 格式化子查询内容
+        # 格式化子查询内容（使用indent_level=0，然后手动添加缩进）
         formatted_select = format_select(inner_content, indent_level=0)
         
         # 添加缩进（子查询内容缩进indent_level + 1）

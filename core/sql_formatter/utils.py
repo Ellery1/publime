@@ -227,22 +227,54 @@ def format_in_clause(condition: str) -> str:
     import re
     
     # 查找IN子句 - 支持表名前缀（如t1.column）和NOT IN
-    # 先尝试匹配 NOT IN
-    match = re.search(r'([\w.]+)\s+(not\s+in)\s*\((.*)\)', condition, re.IGNORECASE | re.DOTALL)
-    if not match:
-        # 如果没有NOT IN，尝试匹配普通的IN
-        match = re.search(r'([\w.]+)\s+(in)\s*\((.*)\)', condition, re.IGNORECASE | re.DOTALL)
-    
-    if not match:
+    # 使用括号深度匹配而非贪婪正则，避免截断后续内容
+    # 先找到IN关键字的位置
+    in_match = re.search(r'([\w.]+)\s+((?:not\s+)?in)\s*\(', condition, re.IGNORECASE)
+    if not in_match:
         return condition
     
-    column = match.group(1)
-    in_keyword = match.group(2)  # 保留原始大小写
-    values_text = match.group(3)
+    column = in_match.group(1)
+    in_keyword = in_match.group(2)  # 保留原始大小写
+    
+    # 找到IN后的左括号位置
+    paren_start = condition.find('(', in_match.start() + len(in_match.group(0)) - 1)
+    if paren_start == -1:
+        return condition
+    
+    # 找到匹配的右括号（考虑括号深度和字符串）
+    depth = 1
+    j = paren_start + 1
+    in_string = False
+    string_char = None
+    while j < len(condition) and depth > 0:
+        ch = condition[j]
+        if ch in ("'", '"') and not in_string:
+            in_string = True
+            string_char = ch
+        elif in_string and ch == string_char:
+            in_string = False
+            string_char = None
+        elif not in_string:
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+        j += 1
+    
+    if depth != 0:
+        return condition
+    
+    paren_end = j - 1  # 指向匹配的 )
+    
+    # 提取括号内的内容
+    values_text = condition[paren_start + 1:paren_end].strip()
+    
+    # 提取IN子句前后的文本
+    before_in = condition[:in_match.start()]
+    after_in = condition[paren_end + 1:]
     
     # 检查是否是子查询（包含SELECT关键字）
     if 'SELECT' in values_text.upper():
-        # 这是一个子查询，不在这里处理，返回原始条件
         return condition
     
     # 分割值（按逗号，但要考虑字符串）
@@ -269,17 +301,11 @@ def format_in_clause(condition: str) -> str:
     if current.strip():
         values.append(current.strip())
     
-    # 如果只有1-2个值，不换行
-    if len(values) <= 2:
-        # 移除每个值前后的空格
-        cleaned_values = [v.strip() for v in values]
-        # IN关键字后有空格
-        return f'{column} {in_keyword} ({", ".join(cleaned_values)})'
-    
-    # 如果值较少（3-5个），也不换行
+    # 如果值较少（<=5个），不换行
     if len(values) <= 5:
         cleaned_values = [v.strip() for v in values]
-        return f'{column} {in_keyword} ({", ".join(cleaned_values)})'
+        formatted_in = f'{column} {in_keyword} ({", ".join(cleaned_values)})'
+        return before_in + formatted_in + after_in
     
     # 构建格式化的IN子句（超过5个值才换行）
     result = f'{column} {in_keyword} (\n'
@@ -290,7 +316,7 @@ def format_in_clause(condition: str) -> str:
             result += f'  {value}\n'
     result += ')'
     
-    return result
+    return before_in + result + after_in
 
 
 
@@ -325,7 +351,7 @@ def remove_space_before_paren(text: str) -> str:
     # 第三步：移除SQL关键字（如LEFT、RIGHT）作为函数使用时与括号间的空格
     # 这些关键字在formatters.py的关键字处理中会被加上前后空格，
     # 当它们作为函数使用时（如LEFT(str, n)），需要移除多余空格
-    sql_keywords_as_functions = r'(?i)\b(LEFT|RIGHT|TRIM|REPLACE|SUBSTRING|SUBSTR|CONVERT|CAST|NULLIF|GREATEST|LEAST)\s+\('
+    sql_keywords_as_functions = r'(?i)\b(LEFT|TRIM|REPLACE|SUBSTRING|SUBSTR|CONVERT|CAST|NULLIF|GREATEST|LEAST)\s+\('
     text = re.sub(sql_keywords_as_functions, lambda m: m.group(1).upper() + '(', text)
     # 匹配左括号后的空格
     text = re.sub(r'\(\s+', '(', text)

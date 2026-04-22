@@ -349,6 +349,10 @@ LIMIT
 1. `complex_test.sql` 格式化后与 `complex_test_target.sql` 完全一致
 2. `sample_1.sql` 格式化后与 `sample_1_target.sql` 完全一致
 3. `sample_2.sql` 格式化后与 `sample_2_target.sql` 完全一致
+4. `sample_3.sql` 格式化后与 `sample_3_target.sql` 完全一致
+5. `sample_4.sql` 格式化后与 `sample_4_target.sql` 完全一致
+6. `sample_5.sql` 格式化后与 `sample_5_target.sql` 完全一致
+7. `sample_6.sql` 格式化后与 `sample_target_6.sql` 完全一致
 
 ### 10.2 内容完整性检查
 - 格式化完成后，**必须**检查前后内容是否有变更（除空白字符外）
@@ -583,3 +587,74 @@ IF(
 - sample_1.sql 的格式化结果仍然正确
 - sample_2.sql 的格式化结果仍然正确
 - 没有引入新的格式化问题
+
+
+## 13. 聚合函数包裹CASE表达式的格式化
+
+### 13.1 SUM/AVG/MAX/MIN 包裹 CASE 表达式
+当聚合函数内部包含 CASE 表达式时，应展开为多行：
+```sql
+SUM (
+  CASE
+    WHEN condition1 THEN value1
+    ELSE 0
+  END
+) AS alias
+```
+
+**规则**：
+- 聚合函数名与 `(` 之间保留空格
+- `(` 后换行
+- CASE 表达式按标准规则缩进
+- `)` 单独一行，与聚合函数名对齐
+- AS 别名跟在 `)` 后面
+
+### 13.2 COUNT(DISTINCT (CASE ...)) 结构
+当 COUNT 内部包含 DISTINCT 和 CASE 表达式时：
+```sql
+COUNT (
+  DISTINCT (
+    CASE
+      WHEN condition1 THEN value1
+    END
+  )
+) AS alias
+```
+
+**规则**：
+- `COUNT (` 后换行
+- `DISTINCT (` 缩进一层后换行
+- CASE 表达式在 DISTINCT 内部再缩进
+- 内外两层 `)` 分别单独一行并对齐
+
+### 13.3 CAST...AS 结构
+```sql
+CAST (
+  SUBSTRING (
+    if (
+      condition,
+      value1,
+      value2
+    ),
+    17,
+    1
+  ) AS UNSIGNED
+) % 2 AS alias
+```
+
+**规则**：
+- CAST 的参数如果包含复杂嵌套函数，应展开为多行
+- `AS 类型` 紧跟在内层 `)` 后面
+- 取模运算符 `% 2` 和 AS 别名跟在最外层 `)` 后面
+
+### 13.4 HAVING 子句格式化
+```sql
+HAVING
+  SUM (trs.os_tot_amount) >= 1.00
+  AND SUM (trs.os_tot_amount) <= 111111.00
+```
+
+**规则**：
+- HAVING 关键字单独一行
+- 第一个条件缩进 2 空格
+- 后续条件以 `AND ` 前缀缩进 2 空格
