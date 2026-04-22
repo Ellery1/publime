@@ -23,7 +23,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v1.2"
+VERSION = "v2.0"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -716,6 +716,11 @@ class MainWindow(QMainWindow):
                 cursor.insertText(result)
             finally:
                 cursor.endEditBlock()
+            # 切换语言为 SQL，更新语法高亮和右下角语言选择器
+            editor.set_language('sql')
+            self.language_combo.blockSignals(True)
+            self.language_combo.setCurrentText("SQL")
+            self.language_combo.blockSignals(False)
             self.statusBar().showMessage("Doris 日志转 SQL 格式化成功", 2000)
         else:
             self.statusBar().showMessage(f"Doris 日志处理失败: {result}", 5000)
