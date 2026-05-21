@@ -150,26 +150,52 @@ def process_doris_log(text: str) -> tuple[bool, str]:
     """
     处理 doris 日志文本，生成格式化后的 SQL。
 
-    将文本按行分割，第一行作为 SQL 行，第二行作为参数行。
-    依次执行：提取 SQL → 去除 COUNT 包裹 → 提取参数 → 替换参数 → 格式化 SQL。
+    扫描所有行，按前缀分类：
+    - '执行sql:' 或 'Preparing:' → SQL 起始行
+    - '执行参数:' 或 'Parameters:' → 参数行
+    - 其余行（在 SQL 起始行之后、参数行之前）→ SQL 续行
+
+    支持 myBatis 两行格式和 doris-api 多行格式。
 
     Args:
-        text: 编辑器中的完整文本（至少两行：SQL行 + 参数行）
+        text: 编辑器中的完整文本
 
     Returns:
         (True, formatted_sql) 成功时返回格式化后的 SQL
         (False, error_message) 失败时返回错误信息
     """
     lines = text.strip().split('\n')
-    if len(lines) < 2:
-        return (False, "输入格式不正确，doris 日志需要至少两行（SQL行和参数行）")
+
+    sql_parts = []
+    param_line = None
+    sql_started = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if '执行参数:' in stripped or 'Parameters:' in stripped:
+            param_line = stripped
+            break
+
+        if '执行sql:' in stripped or 'Preparing:' in stripped:
+            sql_started = True
+            raw = extract_sql_from_log(stripped)
+            sql_parts.append(raw)
+            continue
+
+        if sql_started:
+            sql_parts.append(stripped)
+
+    if not sql_parts:
+        return (False, "未找到SQL内容，请确认输入包含 '执行sql:' 或 'Preparing:'")
+    if param_line is None:
+        return (False, "未找到参数行，请确认输入包含 '执行参数:' 或 'Parameters:'")
 
     try:
-        sql_line = lines[0].strip()
-        param_line = lines[1].strip()
-
-        raw_sql = extract_sql_from_log(sql_line)
-        processed_sql = remove_count_wrapper(raw_sql)
+        full_sql = ' '.join(sql_parts)
+        processed_sql = remove_count_wrapper(full_sql)
         params = extract_parameters(param_line)
 
         executable_sql = replace_parameters(processed_sql, params)

@@ -324,15 +324,14 @@ def format_statement(statement: str) -> str:
     # 判断语句类型
     statement_upper = sql_without_comments.upper().strip()
     
-    # 检查是否包含UNION ALL - 不要求word boundary，因为可能是1union allselect这样的格式
-    if 'UNION' in statement_upper and 'ALL' in statement_upper:
-        formatted = format_union_query(sql_without_comments)
     # 检查是否是 CREATE TABLE ... AS WITH ... 或 CREATE TEMPORARY TABLE ... AS WITH ...
-    elif re.search(r'CREATE\s+(TEMPORARY\s+)?TABLE.*\s+AS\s+WITH\s+', statement_upper):
+    if re.search(r'CREATE\s+(TEMPORARY\s+)?TABLE.*\s+AS\s+WITH\s+', statement_upper):
         formatted = format_create_table_as_with(sql_without_comments)
     elif statement_upper.startswith('WITH'):
-        # 独立的 WITH 语句
         formatted = format_with_clause(sql_without_comments)
+    # 检查是否包含UNION ALL - 不要求word boundary，因为可能是1union allselect这样的格式
+    elif 'UNION' in statement_upper and 'ALL' in statement_upper:
+        formatted = format_union_query(sql_without_comments)
     elif statement_upper.startswith('SELECT'):
         formatted = format_select(sql_without_comments)
     elif statement_upper.startswith('CREATE TABLE'):

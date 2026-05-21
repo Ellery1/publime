@@ -345,7 +345,7 @@ class TestProcessDorisLog:
     def test_less_than_two_lines(self):
         success, result = process_doris_log("Preparing: SELECT 1")
         assert success is False
-        assert "至少两行" in result
+        assert "未找到参数行" in result
 
     def test_empty_input(self):
         success, result = process_doris_log("")
@@ -359,13 +359,13 @@ class TestProcessDorisLog:
         text = "这不是SQL行\nParameters: a(String)"
         success, result = process_doris_log(text)
         assert success is False
-        assert "无法识别的SQL日志格式" in result
+        assert "未找到SQL内容" in result
 
     def test_invalid_param_line(self):
         text = "Preparing: SELECT 1\n这不是参数行"
         success, result = process_doris_log(text)
         assert success is False
-        assert "无法识别的参数格式" in result
+        assert "未找到参数行" in result
 
     def test_param_count_mismatch(self):
         text = (
@@ -400,12 +400,12 @@ class TestIntegration:
 
     @pytest.fixture
     def sample_input(self):
-        path = os.path.join(SAMPLES_DIR, "原始doris日志打印.txt")
+        path = os.path.join(SAMPLES_DIR, "原始doris-api日志打印.txt")
         return read_file(path)
 
     @pytest.fixture
     def expected_output(self):
-        path = os.path.join(SAMPLES_DIR, "处理doris日志之后的效果.sql")
+        path = os.path.join(SAMPLES_DIR, "处理doris-api日志之后的效果.sql")
         return read_file(path)
 
     def test_process_returns_success(self, sample_input):
@@ -463,6 +463,8 @@ class TestIntegration:
             t = _re.sub(r'\s+\)', ')', t)
             # 规范化 != 和 ! = 的差异
             t = t.replace('! =', '!=')
+            # 规范化一元负号：(- expr) → (-expr)
+            t = _re.sub(r'\(\s*-\s+', '(-', t)
             return t
 
         actual_normalized = normalize(result)
