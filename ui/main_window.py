@@ -23,7 +23,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v2.0"
+VERSION = "v2.1"
 
 class MainWindow(QMainWindow):
     """主窗口类"""

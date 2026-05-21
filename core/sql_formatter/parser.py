@@ -173,8 +173,14 @@ def split_statements(text: str) -> List[str]:
         
         # 按位置排序
         positions.sort()
-        
+
         if positions:
+            if positions[0][1].upper() == 'WITH':
+                positions = [
+                    (pos, kw) for pos, kw in positions
+                    if not (kw.upper() == 'SELECT' and pos > 0)
+                ]
+
             # 分割成多个语句
             start = 0
             for pos, kw in positions:

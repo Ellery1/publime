@@ -1590,10 +1590,11 @@ def format_with_clause(statement: str) -> str:
     result_lines = []
     
     for idx, (cte_name, cte_content) in enumerate(ctes):
-        # 避免循环导入
-        from .formatters import format_select
-        # 格式化 SELECT 语句（缩进级别为 0，我们手动添加缩进）
-        formatted_select = format_select(cte_content, indent_level=0)
+        from .formatters import format_select, format_union_query
+        if 'UNION' in cte_content.upper() and 'ALL' in cte_content.upper():
+            formatted_select = format_union_query(cte_content, indent_level=0)
+        else:
+            formatted_select = format_select(cte_content, indent_level=0)
         
         # 给SELECT的每一行添加2个空格的缩进
         select_lines = formatted_select.split('\n')
@@ -1612,8 +1613,11 @@ def format_with_clause(statement: str) -> str:
     
     # 添加最终的 SELECT
     if final_select:
-        from .formatters import format_select
-        formatted_final_select = format_select(final_select, indent_level=0)
+        from .formatters import format_select, format_union_query
+        if 'UNION' in final_select.upper() and 'ALL' in final_select.upper():
+            formatted_final_select = format_union_query(final_select, indent_level=0)
+        else:
+            formatted_final_select = format_select(final_select, indent_level=0)
         result_lines.append(formatted_final_select)
     
     return '\n'.join(result_lines)
