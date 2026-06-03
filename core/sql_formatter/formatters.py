@@ -1549,17 +1549,33 @@ def format_union_query(statement: str, indent_level: int = 0) -> str:
     # 按UNION ALL分割(考虑括号深度)
     parts = split_union_all(statement)
     
+    base_indent = '  ' * indent_level
+    
     # 格式化每个SELECT
     formatted_parts = []
     for i, part in enumerate(parts):
-        formatted = format_select(part.strip(), indent_level=indent_level)
+        part_stripped = part.strip()
+        # 检测是否被括号包裹 (SELECT ... )
+        has_wrapping_parens = part_stripped.startswith('(') and part_stripped.endswith(')')
+        inner = part_stripped[1:-1].strip() if has_wrapping_parens else part_stripped
+
+        formatted = format_select(inner, indent_level=indent_level)
         # 移除SELECT部分的分号
         if formatted.endswith(';'):
             formatted = formatted[:-1]
+
+        if has_wrapping_parens:
+            formatted_lines = formatted.split('\n')
+            # 括号缩进 +2，内容缩进 +4（相对于 base_indent）
+            paren_indent = base_indent + '  '
+            content_indent = base_indent + '    '
+            indented = [content_indent + line for line in formatted_lines]
+            indented.insert(0, f'{paren_indent}(')
+            indented.append(f'{paren_indent})')
+            formatted = '\n'.join(indented)
         formatted_parts.append(formatted)
     
     # 用UNION ALL连接，添加适当的缩进
-    base_indent = '  ' * indent_level
     union_separator = f'\n{base_indent}UNION ALL\n'
     result = union_separator.join(formatted_parts)
     
