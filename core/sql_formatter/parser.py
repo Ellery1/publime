@@ -96,8 +96,17 @@ def split_statements(text: str) -> List[str]:
     if current.strip():
         # 检查是否包含多个语句（通过关键字检测）
         # 查找主要SQL关键字的位置（只在深度为0时）
-        keywords = ['SELECT', 'CREATE', 'UPDATE', 'DELETE', 'INSERT', 'WITH', 'USE']
         positions = []
+
+        def _preceded_by_union(text: str, pos: int) -> bool:
+            """检查 pos 之前的文本（忽略尾部空白）是否以 UNION 或 UNION ALL 结尾"""
+            p = pos - 1
+            while p >= 0 and text[p].isspace():
+                p -= 1
+            if p < 0:
+                return False
+            suffix = text[max(0, p - 10):p + 1].upper()
+            return suffix.endswith('UNION') or suffix.endswith('UNION ALL')
         
         depth = 0
         in_comment = False
@@ -137,8 +146,8 @@ def split_statements(text: str) -> List[str]:
                            remaining_upper.startswith('UPDATE ') or remaining_upper.startswith('DELETE ') or \
                            remaining_upper.startswith('INSERT ') or remaining_upper.startswith('WITH ') or \
                            remaining_upper.startswith('USE '):
-                            # 确保不是第一个关键字
-                            if i > 0:
+                            # 确保不是第一个关键字，且不是 UNION ALL 后面的 SELECT
+                            if i > 0 and not _preceded_by_union(current, i):
                                 # 检查该位置是否已经在positions中
                                 if not any(pos == i for pos, kw in positions):
                                     positions.append((i, remaining_upper.split()[0]))
@@ -165,8 +174,8 @@ def split_statements(text: str) -> List[str]:
                        remaining.startswith('UPDATE ') or remaining.startswith('DELETE ') or \
                        remaining.startswith('INSERT ') or remaining.startswith('WITH ') or \
                        remaining.startswith('USE ')):
-                        # 确保不是第一个关键字
-                        if i > 0:
+                        # 确保不是第一个关键字，且不是 UNION ALL 后面的 SELECT
+                        if i > 0 and not _preceded_by_union(current, i):
                             positions.append((i, remaining.split()[0]))
             
             i += 1

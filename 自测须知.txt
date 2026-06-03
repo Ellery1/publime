@@ -12,6 +12,7 @@ sample_5.sql 格式化之后，内容要跟 sample_5_target.sql 一致
 sample_6.sql 格式化之后，内容要跟 sample_6_target.sql 一致
 原始myBatis日志打印.txt 格式化之后，内容要跟 处理myBatis日志之后的效果.sql 一致
 原始doris-api日志打印.txt 格式化之后，内容要跟 处理doris-api日志之后的效果.sql 一致
+原始doris-api日志打印_2.txt 格式化之后，内容要跟 处理doris-api日志之后的效果_2.sql 一致
 
 注意：如果这几个“一致”的要求，本身就有冲突，那么请你在修改代码之前先问我，我来判断以谁为准。
 然后请你以文字描述的形式，整理出当前的sql格式化规则，更新到 /sql_formatter/sql_formatter.md

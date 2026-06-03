@@ -686,10 +686,31 @@ class MainWindow(QMainWindow):
             return
 
         # 优先级3: SQL（以 SQL 关键字开头，不区分大小写）
+        # 先跳过注释行，再检查是否以 SQL 关键字开头
         sql_keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'WITH']
-        text_upper = text.upper().lstrip()
-        if any(text_upper.startswith(kw) for kw in sql_keywords):
-            self.format_sql()
+        in_block_comment = False
+        for raw_line in text.split('\n'):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            if in_block_comment:
+                if '*/' in stripped:
+                    in_block_comment = False
+                continue
+            if stripped.startswith('/*'):
+                if '*/' not in stripped:
+                    in_block_comment = True
+                continue
+            if stripped.startswith('--'):
+                continue
+            # 找到第一个非注释行，检查是否是 SQL
+            if any(stripped.upper().startswith(kw) for kw in sql_keywords):
+                self.format_sql()
+            else:
+                self.statusBar().showMessage(
+                    "无法识别当前内容的格式类型，不是 sql、json 或者 doris 日志 的任何一种，请检查输入是否正确",
+                    5000
+                )
             return
 
         # 无法识别

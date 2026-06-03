@@ -126,6 +126,29 @@ def format_case_expression(expression: str, indent_level: int = 0) -> str:
     lines.append(f'{base_indent}CASE')
 
     i = 0
+    # 跳过空白
+    while i < len(case_body) and case_body[i].isspace():
+        i += 1
+
+    # 处理 CASE value WHEN ... 语法：提取 CASE 后的值表达式
+    if i < len(case_body) and case_body[i:i+4].upper() != 'WHEN' and case_body[i:i+4].upper() != 'ELSE':
+        # CASE value WHEN ... 形式
+        value_expr = ''
+        depth = 0
+        while i < len(case_body):
+            if case_body[i] == '(':
+                depth += 1
+                value_expr += case_body[i]
+            elif case_body[i] == ')':
+                depth -= 1
+                value_expr += case_body[i]
+            elif depth == 0 and case_body[i:i+4].upper() == 'WHEN':
+                break
+            else:
+                value_expr += case_body[i]
+            i += 1
+        lines.append(f'{item_indent}{value_expr.strip()}')
+
     while i < len(case_body):
         # 跳过空白
         while i < len(case_body) and case_body[i].isspace():
