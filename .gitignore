@@ -49,6 +49,7 @@ Thumbs.db
 temp/
 tmp/
 history.json
+config.json
 
 # PyInstaller
 *.spec

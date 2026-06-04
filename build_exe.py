@@ -1,41 +1,43 @@
 """
-打包 Publime 为 EXE 文件
+打包 Publime 为 EXE 文件（使用 Python 3.13 + PyInstaller）。
 """
 
 import PyInstaller.__main__
 import os
 import sys
+import tempfile
 
-# 获取图标路径
-icon_path = os.path.join('ui', 'sekiro.icon')
+icon_path = os.path.join("ui", "sekiro_2_256x256.ico")
 
-# 检查图标文件是否存在
 if not os.path.exists(icon_path):
     print(f"错误：图标文件不存在: {icon_path}")
     sys.exit(1)
 
-print("开始打包 Publime...")
-print(f"使用图标: {icon_path}")
+# Windows Store 版 Python 3.13 不能在项目目录下写 build 文件，用临时目录
+build_dir = os.path.join(tempfile.gettempdir(), "publime_build")
 
-# PyInstaller 参数
+print(f"Python: {sys.version}")
+print(f"Build dir: {build_dir}")
+print(f"Icon: {icon_path}")
+
 args = [
-    'main.py',                          # 主程序文件
-    '--name=Publime',                   # 程序名称
-    '--windowed',                       # 不显示控制台窗口
-    f'--icon={icon_path}',              # 程序图标
-    '--onefile',                        # 打包成单个文件
-    '--noupx',                          # 不使用 UPX 压缩（避免解压错误）
-    '--clean',                          # 清理临时文件
-    '--noconfirm',                      # 不询问确认
-    # 添加数据文件（Windows 使用分号）
-    f'--add-data={icon_path};ui',       # 包含图标文件
+    "main.py",
+    "--name=Publime",
+    "--windowed",
+    f"--icon={icon_path}",
+    "--onefile",
+    "--noupx",
+    "--noconfirm",
+    "--hidden-import=pymysql",
+    "--collect-all=pymysql",
+    f"--add-data={icon_path};ui",
+    f"--workpath={build_dir}",
+    "--distpath=dist",
 ]
-
-print(f"PyInstaller 参数: {' '.join(args)}")
 
 try:
     PyInstaller.__main__.run(args)
-    print("\n✅ 打包完成！EXE 文件位于 dist/Publime.exe")
+    print("\nOK 打包完成！EXE 文件位于 dist/Publime.exe")
 except Exception as e:
-    print(f"\n❌ 打包失败: {e}")
+    print(f"\nFAIL 打包失败: {e}")
     sys.exit(1)

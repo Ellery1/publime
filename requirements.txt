@@ -13,6 +13,9 @@ pytest-benchmark>=4.0.0
 # Property-Based Testing
 hypothesis>=6.92.0
 
+# Database
+pymysql>=1.1.0
+
 # File Encoding Detection
 chardet>=5.0.0
 

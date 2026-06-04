@@ -23,7 +23,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v2.1"
+VERSION = "v3.0"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
         
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(__file__), 'sekiro.icon')
+        icon_path = os.path.join(os.path.dirname(__file__), 'sekiro_2_256x256.ico')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
@@ -270,7 +270,15 @@ class MainWindow(QMainWindow):
         find_in_files_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
         find_in_files_action.triggered.connect(self.show_find_in_files_dialog)
         search_menu.addAction(find_in_files_action)
-        
+
+        # 工具菜单
+        tool_menu = menubar.addMenu("工具(&T)")
+
+        ai_debug_action = QAction("AI 排障(&A)", self)
+        ai_debug_action.setShortcut(QKeySequence("Ctrl+Shift+D"))
+        ai_debug_action.triggered.connect(self.open_ai_debug_dialog)
+        tool_menu.addAction(ai_debug_action)
+
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
         
@@ -1181,15 +1189,47 @@ class MainWindow(QMainWindow):
             self.language_combo.setCurrentText(display_name)
             self.language_combo.blockSignals(False)
     
+    def open_ai_debug_dialog(self):
+        """打开 AI 排障对话框（单例）。"""
+        try:
+            from ui.ai_debug_dialog import AiDebugDialog
+            dlg = AiDebugDialog.get_instance(self)
+
+            # 如果编辑器中有选中文本，自动填入 SQL 输入框
+            editor = self.tab_widget.get_current_editor()
+            if editor:
+                cursor = editor.textCursor()
+                if cursor.hasSelection():
+                    dlg.set_sql_text(cursor.selectedText())
+
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+        except Exception as e:
+            import traceback, sys
+            exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            log_path = os.path.join(exe_dir, 'publime_error.log')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f"[AI排障 启动失败] {e}\n{traceback.format_exc()}\n")
+            QMessageBox.critical(
+                self, "AI 排障启动失败",
+                f"无法打开 AI 排障对话框:\n{e}\n\n详情已写入 {log_path}"
+            )
+
     def show_about(self):
         """显示关于对话框"""
-        QMessageBox.about(
-            self,
-            "关于 Publime 文本编辑器",
+        msg = QMessageBox(self)
+        msg.setWindowTitle("关于 Publime 文本编辑器")
+        icon_path = os.path.join(os.path.dirname(__file__), 'sekiro_2_256x256.ico')
+        if os.path.exists(icon_path):
+            msg.setIconPixmap(QIcon(icon_path).pixmap(64, 64))
+        msg.setText(
+            f"Publime 文本编辑器\n\n"
             f"版本: {VERSION}，感谢小勇哥提的bug\n\n"
             f"一个使用 Python 和 PySide6 实现的文本编辑器\n"
             f"作为 Sublime Text 的平替工具"
         )
+        msg.exec()
     
     def auto_save_all(self):
         """自动保存所有打开的文件"""
