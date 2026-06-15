@@ -29,7 +29,6 @@ args = [
     "--noupx",
     "--noconfirm",
     "--hidden-import=pymysql",
-    "--collect-all=pymysql",
     f"--add-data={icon_path};ui",
     f"--workpath={build_dir}",
     "--distpath=dist",

@@ -6,7 +6,8 @@
 
 from PySide6.QtWidgets import (
     QMainWindow, QMenuBar, QMenu, QToolBar, QStatusBar,
-    QFileDialog, QMessageBox, QApplication, QPlainTextEdit, QComboBox, QLabel
+    QFileDialog, QMessageBox, QApplication, QPlainTextEdit, QComboBox, QLabel,
+    QDialog, QVBoxLayout
 )
 from PySide6.QtCore import Qt, QUrl, Signal, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QIcon
@@ -23,7 +24,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v3.0"
+VERSION = "v3.1"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -167,6 +168,17 @@ class MainWindow(QMainWindow):
         self.encoding_combo.currentTextChanged.connect(self.on_encoding_changed)
         statusbar.addPermanentWidget(QLabel("编码: "))
         statusbar.addPermanentWidget(self.encoding_combo)
+
+        # 字数统计（可点击弹出详情）
+        self._word_count_label = QLabel()
+        self._word_count_label.setTextFormat(Qt.RichText)
+        self._word_count_label.setOpenExternalLinks(False)
+        self._word_count_label.linkActivated.connect(self._on_word_count_clicked)
+        self._word_count_label.setMinimumWidth(90)
+        self._word_count_label.setText(
+            '<a href="word_count" style="color: #ffffff; text-decoration: none; font-weight: normal;">字数: 0</a>')
+        statusbar.addPermanentWidget(QLabel(" "))
+        statusbar.addPermanentWidget(self._word_count_label)
     
     def create_menus(self):
         """创建菜单栏"""
@@ -1188,7 +1200,120 @@ class MainWindow(QMainWindow):
             self.language_combo.blockSignals(True)
             self.language_combo.setCurrentText(display_name)
             self.language_combo.blockSignals(False)
-    
+
+        # 更新字数
+        self._update_word_count()
+
+    # ── 字数统计 ──
+
+    @staticmethod
+    def _is_cjk(ch: str) -> bool:
+        cp = ord(ch)
+        return (0x4E00 <= cp <= 0x9FFF or   # CJK Unified
+                0x3400 <= cp <= 0x4DBF)       # CJK Ext-A
+
+    @classmethod
+    def _count_stats(cls, text: str) -> dict:
+        """统计字数、字符数。"""
+        char_with_space = len(text)
+        char_no_space = sum(1 for c in text if c not in (' ', '\t', '\r'))
+
+        # ── 字数算法 ──
+        # CJK 字符每个算 1 字；连续英文字母串算 1 字；连续数字串算 1 字；
+        # 标点符号每个算 1 字；空白字符不计。
+        word_count = 0
+        state = None  # None | 'letter' | 'digit'
+
+        for ch in text:
+            if ch == '\n':
+                if state:
+                    word_count += 1
+                    state = None
+                continue
+            if ch in (' ', '\t', '\r'):
+                if state:
+                    word_count += 1
+                    state = None
+                continue
+
+            if cls._is_cjk(ch):
+                if state:
+                    word_count += 1
+                    state = None
+                word_count += 1
+            elif ch.isalpha():
+                if state == 'digit':
+                    word_count += 1
+                    state = 'letter'
+                elif state is None:
+                    state = 'letter'
+            elif ch.isdigit():
+                if state == 'letter':
+                    word_count += 1
+                    state = 'digit'
+                elif state is None:
+                    state = 'digit'
+            elif ch == '.' and state == 'digit':
+                # 小数点在数字串中间，视为数字的一部分
+                pass
+            else:
+                # 标点、符号
+                if state:
+                    word_count += 1
+                    state = None
+                word_count += 1
+
+        if state:
+            word_count += 1
+
+        return {
+            "word_count": word_count,
+            "char_with_space": char_with_space,
+            "char_no_space": char_no_space,
+        }
+
+    def _update_word_count(self):
+        """更新状态栏字数。"""
+        editor = self.tab_widget.get_current_editor()
+        if not editor:
+            self._word_count_label.setText(
+                '<a href="word_count" style="color: #ffffff; text-decoration: none; font-weight: normal;">字数: 0</a>')
+            return
+        stats = self._count_stats(editor.toPlainText())
+        self._word_count_label.setText(
+            f'<a href="word_count" style="color: #ffffff; text-decoration: none; font-weight: normal;">字数: {stats["word_count"]}</a>')
+
+    def _on_word_count_clicked(self, link: str):
+        """点击字数标签弹出详情。"""
+        editor = self.tab_widget.get_current_editor()
+        if not editor:
+            return
+        stats = self._count_stats(editor.toPlainText())
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("字数统计")
+        dlg.setFixedSize(360, 200)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(14)
+
+        title = QLabel(f"<h3 style='margin:0;'>字数统计</h3>")
+        lay.addWidget(title)
+
+        row1 = QLabel(f"字数: <b>{stats['word_count']}</b>")
+        row1.setStyleSheet("font-size: 14px;")
+        lay.addWidget(row1)
+
+        row2 = QLabel(f"字符数（计空格）: <b>{stats['char_with_space']}</b>")
+        row2.setStyleSheet("font-size: 14px;")
+        lay.addWidget(row2)
+
+        row3 = QLabel(f"字符数（不计空格）: <b>{stats['char_no_space']}</b>")
+        row3.setStyleSheet("font-size: 14px;")
+        lay.addWidget(row3)
+
+        dlg.exec()
+
     def open_ai_debug_dialog(self):
         """打开 AI 排障对话框（单例）。"""
         try:
