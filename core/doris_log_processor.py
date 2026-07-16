@@ -67,18 +67,21 @@ def extract_parameters_preparing(param_str: str) -> list[str]:
     return [re.sub(r'\(.*\)', '', p).strip() for p in parts]
 
 
-def extract_parameters_exec(param_str: str) -> list[str]:
+def extract_parameters_exec(param_str: str) -> list:
     """
     从 '执行参数:' 格式的参数字符串中提取参数值列表。
 
     格式: '["value1","value2",123]'
     先去除外层 []，然后用正则匹配带引号的字符串和不带引号的值。
+    JSON 中带引号的值会被标记为强制字符串类型（即使内容看似数字），
+    确保在替换 ? 占位符时正确加引号。
     """
     param_str = re.sub(r'^\[|]$', '', param_str.strip())
     params = []
     for m in re.finditer(r'"([^"]*)"|([^,]+)', param_str):
         if m.group(1) is not None:
-            params.append(m.group(1))
+            # JSON 中带引号的值，强制标记为字符串类型
+            params.append(('STRING', m.group(1)))
         elif m.group(2) is not None:
             params.append(m.group(2).strip())
     return params
@@ -112,11 +115,12 @@ def is_numeric(param: str) -> bool:
     return bool(re.fullmatch(r'-?\d+(\.\d+)?', param))
 
 
-def replace_parameters(sql: str, params: list[str]) -> str:
+def replace_parameters(sql: str, params: list) -> str:
     """
     将 SQL 模板中的 ? 占位符替换为实际参数值。
 
     替换规则（与 SqlFormatterUtil.java 一致）：
+    - 参数若标记为 ('STRING', value) → 强制加引号（来自 JSON 带引号值）
     - 先判断日期格式 → 用单引号包裹
     - 再判断数字格式 → 直接替换
     - 其余视为字符串 → 用单引号包裹
@@ -136,7 +140,10 @@ def replace_parameters(sql: str, params: list[str]) -> str:
     for m in re.finditer(r'\?', sql):
         result.append(sql[last_pos:m.start()])
         param = params[param_index]
-        if is_datetime_param(param) or not is_numeric(param):
+        if isinstance(param, tuple) and param[0] == 'STRING':
+            # JSON 引号值强制作为字符串
+            result.append(f"'{param[1]}'")
+        elif is_datetime_param(param) or not is_numeric(param):
             result.append(f"'{param}'")
         else:
             result.append(param)
@@ -194,7 +201,7 @@ def process_doris_log(text: str) -> tuple[bool, str]:
         return (False, "未找到参数行，请确认输入包含 '执行参数:' 或 'Parameters:'")
 
     try:
-        full_sql = ' '.join(sql_parts)
+        full_sql = '\n'.join(sql_parts)
         processed_sql = remove_count_wrapper(full_sql)
         params = extract_parameters(param_line)
 

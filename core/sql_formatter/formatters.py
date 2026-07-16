@@ -218,6 +218,10 @@ def format_statement(statement: str) -> str:
         pos = 0
         for idx, token in enumerate(tokens):
             token_start = text.find(token, pos)
+            # 跳过包含中文/全角字符的 token（注释内容，不是 SQL 代码）
+            if re.search(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', token):
+                pos = token_start + len(token)
+                continue
             # 遇到另一个 -- 注释
             if token.startswith('--') and idx > 0:
                 return token_start
@@ -269,35 +273,28 @@ def format_statement(statement: str) -> str:
                 if line_end == -1:
                     line_end = len(sql_text)
                 comment_content = sql_text[i + 2:line_end]  # 去掉 --
-                # 在注释内容中查找SQL代码
-                sql_start = find_sql_code_start(comment_content)
-                if sql_start >= 0:
-                    # 找到了SQL代码，截断注释
-                    real_comment = '--' + comment_content[:sql_start].rstrip()
-                    result += f'__COMMENT__{real_comment}__COMMENT__ '
-                    i = comment_start + 2 + sql_start
+                # compress_sql_preserving_comments 已经正确分离了注释和代码，
+                # 所以 -- 之后的内容始终是纯注释，不需要尝试从中查找SQL代码
+                full_comment = '--' + comment_content
+                # 检查是否有多个连续 -- 注释
+                sub_positions = []
+                search_pos = 2
+                while True:
+                    next_dash = full_comment.find('--', search_pos)
+                    if next_dash == -1:
+                        break
+                    sub_positions.append(next_dash)
+                    search_pos = next_dash + 2
+                if sub_positions:
+                    positions = [0] + sub_positions
+                    for ci, p in enumerate(positions):
+                        end = positions[ci + 1] if ci + 1 < len(positions) else len(full_comment)
+                        single_comment = full_comment[p:end].rstrip()
+                        if single_comment:
+                            result += f'__COMMENT__{single_comment}__COMMENT__ '
                 else:
-                    # 没有找到SQL代码，整个都是注释
-                    full_comment = '--' + comment_content
-                    # 检查是否有多个连续 -- 注释
-                    sub_positions = []
-                    search_pos = 2
-                    while True:
-                        next_dash = full_comment.find('--', search_pos)
-                        if next_dash == -1:
-                            break
-                        sub_positions.append(next_dash)
-                        search_pos = next_dash + 2
-                    if sub_positions:
-                        positions = [0] + sub_positions
-                        for ci, p in enumerate(positions):
-                            end = positions[ci + 1] if ci + 1 < len(positions) else len(full_comment)
-                            single_comment = full_comment[p:end].rstrip()
-                            if single_comment:
-                                result += f'__COMMENT__{single_comment}__COMMENT__ '
-                    else:
-                        result += f'__COMMENT__{full_comment}__COMMENT__'
-                    i = line_end
+                    result += f'__COMMENT__{full_comment}__COMMENT__'
+                i = line_end
                 continue
             result += char
             i += 1
@@ -612,8 +609,23 @@ def format_select(statement: str, indent_level: int = 0) -> str:
         (r'(?i)(?![^(]*\))\b(desc)\b', lambda m: ' ' + m.group(1).upper())
     ]
     
+    # 保护 __COMMENT__ 块：在应用关键字模式前，用占位符替换注释块
+    # 防止关键字模式修改注释中的文本（如 -- 可 hash join; 中的 join）
+    comment_blocks = {}
+    def _protect_comment(m):
+        key = f'__CBLOCK_{len(comment_blocks)}__'
+        comment_blocks[key] = m.group(0)
+        return key
+    statement_with_markers = re.sub(
+        r'__COMMENT__.*?__COMMENT__', _protect_comment, statement_with_markers
+    )
+    
     for pattern, replacement in keywords_patterns:
         statement_with_markers = re.sub(pattern, replacement, statement_with_markers)
+    
+    # 恢复被保护的注释块
+    for key, value in comment_blocks.items():
+        statement_with_markers = statement_with_markers.replace(key, value)
     
     # 清理多余空格（但保留注释标记）
     statement_with_markers = ' '.join(statement_with_markers.split())

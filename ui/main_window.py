@@ -24,7 +24,7 @@ import tempfile
 from datetime import datetime
 
 # 版本号
-VERSION = "v3.1"
+VERSION = "v3.2"
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -1350,7 +1350,7 @@ class MainWindow(QMainWindow):
             msg.setIconPixmap(QIcon(icon_path).pixmap(64, 64))
         msg.setText(
             f"Publime 文本编辑器\n\n"
-            f"版本: {VERSION}，感谢小勇哥提的bug\n\n"
+            f"版本: {VERSION}，感谢小勇哥和金老师提的bug\n\n"
             f"一个使用 Python 和 PySide6 实现的文本编辑器\n"
             f"作为 Sublime Text 的平替工具"
         )

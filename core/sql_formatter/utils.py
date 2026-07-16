@@ -161,19 +161,25 @@ def compact_json_table(text: str) -> str:
 
 def add_space_after_comma(text: str) -> str:
     """
-    在函数调用的逗号后添加空格
-    
+    在函数调用的逗号后添加空格，但不影响 -- 注释中的逗号。
+
     Args:
         text: SQL文本
-        
+
     Returns:
         处理后的文本
     """
-    # 在逗号后添加空格（如果后面不是空格或换行）
-    # 使用正则表达式：逗号后面不是空格、换行或右括号时，添加空格
-    text = re.sub(r',(?=[^\s\n)])', r', ', text)
-    
-    return text
+    lines = text.split('\n')
+    result_lines = []
+    for line in lines:
+        comment_pos = line.find('--')
+        if comment_pos != -1:
+            # 只处理 -- 注释之前的部分，保护注释内容不被修改
+            before = re.sub(r',(?=[^\s\n)])', r', ', line[:comment_pos])
+            result_lines.append(before + line[comment_pos:])
+        else:
+            result_lines.append(re.sub(r',(?=[^\s\n)])', r', ', line))
+    return '\n'.join(result_lines)
 
 
 def add_space_around_equals(text: str) -> str:

@@ -95,19 +95,21 @@ def format_case_expression(expression: str, indent_level: int = 0) -> str:
         格式化后的 CASE 表达式
     """
     # 首先提取 AS 子句（在调用separate_keywords之前，以保留原始大小写）
-    as_match = re.search(r'(?i)\s+AS\s+\w+', expression)
-    if as_match:
-        as_clause = as_match.group(0)
-        # 保持AS关键字的原始大小写
-        # 只清理多余空格
-        as_clause = ' '.join(as_clause.split())
-        # 确保前面有空格
-        if not as_clause.startswith(' '):
-            as_clause = ' ' + as_clause
-        case_body = expression[:as_match.start()].strip()
-    else:
-        as_clause = ''
-        case_body = expression.strip()
+    # 使用深度感知的方式从右往左搜索：找到括号深度为 0 的最后一个 AS
+    # 这样可以避免错误匹配 CAST(... AS DECIMAL(...)) 中的 AS
+    depth = 0
+    as_clause = ''
+    case_body = expression.strip()
+    for i in range(len(expression) - 2, 0, -1):
+        if expression[i] == ')':
+            depth += 1
+        elif expression[i] == '(':
+            depth -= 1
+        elif depth == 0 and expression[i-1:i+3].upper() == ' AS ':
+            as_clause_text = expression[i-1:].strip()
+            as_clause = ' ' + ' '.join(as_clause_text.split())
+            case_body = expression[:i-1].strip()
+            break
     
     from .utils import separate_keywords
     # 分离关键字，解决如country_rankFROM这样的问题
@@ -1554,8 +1556,28 @@ def format_with_clause(statement: str) -> str:
     Returns:
         格式化后的 WITH 子句
     """
-    # 移除所有换行，变成一行
-    statement = ' '.join(statement.split())
+    # 移除所有换行，变成一行，但保留 -- 注释的换行边界
+    # 这样可以防止 -- 注释在压缩后"吃掉"后续的 SQL 代码
+    from .utils import extract_inline_comment as _extract_comment
+    lines = statement.split('\n')
+    compressed_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('--'):
+            compressed_lines.append('\n' + stripped + '\n')
+        elif '--' in stripped:
+            code_part, comment_part = _extract_comment(stripped)
+            if code_part:
+                compressed_lines.append(code_part)
+            if comment_part:
+                compressed_lines.append('\n' + comment_part + '\n')
+        else:
+            compressed_lines.append(stripped)
+    statement = ' '.join(compressed_lines)
+    # 清理多余的连续换行符
+    statement = re.sub(r'\n\s*\n', '\n', statement)
     
     # 移除分号
     statement = statement.rstrip(';').strip()

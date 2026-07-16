@@ -121,12 +121,12 @@ class TestExtractParameters:
     def test_exec_params_format_strings(self):
         line = '执行参数:["value1","value2","value3"]'
         result = extract_parameters(line)
-        assert result == ["value1", "value2", "value3"]
+        assert result == [('STRING', 'value1'), ('STRING', 'value2'), ('STRING', 'value3')]
 
     def test_exec_params_format_mixed(self):
         line = '执行参数:["hello",123,45.6]'
         result = extract_parameters(line)
-        assert result == ["hello", "123", "45.6"]
+        assert result == [('STRING', 'hello'), '123', '45.6']
 
     def test_nested_parentheses(self):
         """参数值内部包含括号时，逗号分割不会错误拆分括号内的逗号"""
@@ -168,11 +168,11 @@ class TestExtractParametersExec:
 
     def test_all_strings(self):
         result = extract_parameters_exec('["a","b","c"]')
-        assert result == ["a", "b", "c"]
+        assert result == [('STRING', 'a'), ('STRING', 'b'), ('STRING', 'c')]
 
     def test_mixed_types(self):
         result = extract_parameters_exec('["hello",42,true]')
-        assert result == ["hello", "42", "true"]
+        assert result == [('STRING', 'hello'), '42', 'true']
 
 
 # ============================================================
