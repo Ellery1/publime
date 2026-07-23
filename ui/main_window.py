@@ -128,8 +128,9 @@ class MainWindow(QMainWindow):
         """创建状态栏，包含编码和语言选择器"""
         statusbar = self.statusBar()
         
-        # 状态消息标签（左侧）
+        # 状态消息标签（左侧），支持选中复制
         self.status_label = QLabel("就绪")
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         statusbar.addWidget(self.status_label)
         
         # 添加弹簧，将右侧控件推到右边
@@ -1176,9 +1177,17 @@ class MainWindow(QMainWindow):
         """更新状态栏信息"""
         editor = self.tab_widget.get_current_editor()
         if not editor:
+            self.status_label.setText("就绪")
             self.language_combo.setCurrentText("Plain Text")
             self.encoding_combo.setCurrentText("UTF-8")
             return
+        
+        # 更新状态栏为当前文件的绝对路径
+        file_path = editor.get_file_path()
+        if file_path:
+            self.status_label.setText(file_path)
+        else:
+            self.status_label.setText("就绪（未保存）")
         
         # 更新语言显示
         file_path = editor.get_file_path()
